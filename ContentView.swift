@@ -32,20 +32,21 @@ struct ContentView: View {
                     Spacer()
                         .frame(height: 28) // Space for traffic light buttons
                     
-                    // App Branding
+                    // App Branding (Real AppIcon)
                     HStack(spacing: 10) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.accentColor.opacity(0.15))
-                                .frame(width: 28, height: 28)
+                        if let nsImage = NSImage(named: "AppIcon") {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 24, height: 24)
+                        } else {
                             ZStack {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.accentColor.opacity(0.15))
+                                    .frame(width: 24, height: 24)
                                 Image(systemName: "shield.fill")
-                                    .font(.system(size: 15, weight: .bold))
+                                    .font(.system(size: 12))
                                     .foregroundColor(.accentColor)
-                                Image(systemName: "clock.fill")
-                                    .font(.system(size: 6, weight: .bold))
-                                    .foregroundColor(.accentColor.opacity(0.85))
-                                    .offset(y: 2)
                             }
                         }
                         Text("IdleSentry")
