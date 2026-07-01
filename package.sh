@@ -158,7 +158,7 @@ rm -f "${TEMP_DMG}"
 
 echo ""
 echo "════════════════════════════════════════"
-echo "  ✅ DMG created: ${DMG_NAME}"
+echo "  DMG created: ${DMG_NAME}"
 echo "  Build: ${DISPLAY_BUILD} (${BUILD_TYPE})"
 echo "════════════════════════════════════════"
 echo ""

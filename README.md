@@ -1,28 +1,28 @@
-# 🛡️ IdleSentry
+# IdleSentry
 
 A native, lightweight macOS menu bar utility that automatically terminates sensitive applications when your machine goes idle, keeping your active workspace private from prying eyes.
 
 ---
 
-## 💡 The Problem
+## The Problem
 Imagine you're at the office, a coffee shop, or working around family. Your boss calls you suddenly, or you step away for a quick break. You don't lock your screen in time, leaving Slack, browser tabs, password managers, or sensitive documents fully exposed. 
 
 **IdleSentry** solves this. It runs quietly in the menu bar, monitors user inactivity, and automatically terminates pre-configured sensitive apps once a custom countdown expires.
 
 ---
 
-## ✨ Features
+## Features
 
-- 🔋 **Native & Lightweight**: Built with native Swift and SwiftUI. Run-time footprint is minimal (near-zero CPU, tiny memory footprint).
-- 🕒 **Custom Inactivity Timer**: Enforce a global inactivity threshold before countdown triggering.
-- 🎯 **Targeted Protection**: Only terminates the specific applications you configure.
-- ⚡ **Quit Behaviors**: Choose between **Standard Quit** (safely lets apps save data) or **Force Quit** (instant process termination).
-- ⚙️ **Launch on Startup**: Native login item support (`SMAppService`) to keep you protected automatically.
-- 🔒 **Privacy First**: operates 100% locally on your machine. No telemetry, no analytic trackers, and no internet access required.
+- **Native & Lightweight**: Built with native Swift and SwiftUI. Run-time footprint is minimal (near-zero CPU, tiny memory footprint).
+- **Custom Inactivity Timer**: Enforce a global inactivity threshold before countdown triggering.
+- **Targeted Protection**: Only terminates the specific applications you configure.
+- **Quit Behaviors**: Choose between **Standard Quit** (safely lets apps save data) or **Force Quit** (instant process termination).
+- **Launch on Startup**: Native login item support (`SMAppService`) to keep you protected automatically.
+- **Privacy First**: operates 100% locally on your machine. No telemetry, no analytic trackers, and no internet access required.
 
 ---
 
-## 📦 Installation & Gatekeeper Note
+## Installation & Gatekeeper Note
 
 Because IdleSentry is free and open-source, it is signed locally (ad-hoc) rather than using a paid Apple Developer certificate. On first launch, macOS Gatekeeper will block execution with a warning.
 
@@ -39,7 +39,7 @@ To bypass this and run the app:
 
 ---
 
-## 🛠️ Compiling from Source
+## Compiling from Source
 
 You can easily build the project yourself using the included build tools:
 
@@ -60,12 +60,12 @@ You can easily build the project yourself using the included build tools:
 
 ---
 
-## 🖥️ Windows Version
+## Windows Version
 A native Windows port (supporting standard Windows PCs, 32-bit x86, and Qualcomm/Snapdragon ARM64 machines) is currently under active development. Stay tuned!
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the **Apache License 2.0**. 
 
