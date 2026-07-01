@@ -1,6 +1,6 @@
 # IdleSentry
 
-A native, lightweight macOS menu bar utility that automatically terminates sensitive applications when your machine goes idle, keeping your active workspace private from prying eyes.
+A native, lightweight utility that automatically terminates sensitive applications when your machine goes idle, keeping your active workspace private from prying eyes.
 
 ---
 
