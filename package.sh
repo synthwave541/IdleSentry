@@ -68,9 +68,7 @@ To fix this and run the app:
 This clears the macOS quarantine flag, and the app will open and run perfectly.
 EOF
 
-# Put the background image inside a hidden folder
-mkdir -p dmg_staging/.background
-cp background.png dmg_staging/.background/background.png
+# Assemble files (No custom background, standard system theme)
 
 echo "Creating temporary read-write DMG..."
 hdiutil create \
@@ -100,22 +98,19 @@ tell application "Finder"
         set current view of theWindow to icon view
         set toolbar visible of theWindow to false
         set statusbar visible of theWindow to false
-        set the bounds of theWindow to {200, 120, 800, 500}
+        set the bounds of theWindow to {200, 120, 800, 480}
         
         set theViewOpts to the icon view options of theWindow
         set icon size of theViewOpts to 96
         set text size of theViewOpts to 12
         set arrangement of theViewOpts to not arranged
         
-        -- Set background image
-        set background picture of theViewOpts to file ".background:background.png"
-        
         delay 1
         
-        -- Position the three items
-        set position of item "${APP_NAME}.app" to {150, 190}
-        set position of item "Applications" to {450, 190}
-        set position of item "How to Install (Fix Error).txt" to {300, 290}
+        -- Position the three items in a clean row
+        set position of item "${APP_NAME}.app" to {120, 160}
+        set position of item "Applications" to {300, 160}
+        set position of item "How to Install (Fix Error).txt" to {480, 160}
         
         delay 1
         
@@ -130,15 +125,14 @@ tell application "Finder"
         set current view of theWindow to icon view
         set toolbar visible of theWindow to false
         set statusbar visible of theWindow to false
-        set the bounds of theWindow to {200, 120, 800, 500}
+        set the bounds of theWindow to {200, 120, 800, 480}
         
         set theViewOpts to the icon view options of theWindow
         set icon size of theViewOpts to 96
-        set background picture of theViewOpts to file ".background:background.png"
         
-        set position of item "${APP_NAME}.app" to {150, 190}
-        set position of item "Applications" to {450, 190}
-        set position of item "How to Install (Fix Error).txt" to {300, 290}
+        set position of item "${APP_NAME}.app" to {120, 160}
+        set position of item "Applications" to {300, 160}
+        set position of item "How to Install (Fix Error).txt" to {480, 160}
         
         delay 1
         close
