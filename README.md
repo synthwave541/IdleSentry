@@ -2,14 +2,10 @@
 
 A native, lightweight macOS menu bar utility that automatically terminates sensitive applications when your machine goes idle, keeping your active workspace private from prying eyes.
 
-<p align="center">
-  <img src="AppIcon.icns" width="128" height="128" alt="IdleSentry Icon">
-</p>
-
 ---
 
 ## 💡 The Problem
-Imagine you're at the office, a coffee shop, or working around family. Your boss calls you suddenly, or you step away for a quick break. You don't lock your screen in time, leaving Slack, browser tabs, password managers, or terminal sessions fully exposed. 
+Imagine you're at the office, a coffee shop, or working around family. Your boss calls you suddenly, or you step away for a quick break. You don't lock your screen in time, leaving Slack, browser tabs, password managers, or sensitive documents fully exposed. 
 
 **IdleSentry** solves this. It runs quietly in the menu bar, monitors user inactivity, and automatically terminates pre-configured sensitive apps once a custom countdown expires.
 
