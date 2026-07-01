@@ -407,7 +407,7 @@ struct GeneralSettingsView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("General Settings")
                     .font(.system(size: 18, weight: .bold))
@@ -446,7 +446,7 @@ struct GeneralSettingsView: View {
                         .foregroundColor(.secondary)
                     
                     HStack(spacing: 12) {
-                        Slider(value: $appState.globalTimeout, in: 10...3600, step: 10)
+                        Slider(value: $appState.globalTimeout, in: 10...3600)
                             .accentColor(.accentColor)
                         
                         Text(formatTimeout(appState.globalTimeout))
@@ -693,7 +693,7 @@ struct PermissionsView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
                 Text("System Permissions")
                     .font(.system(size: 18, weight: .bold))
@@ -846,10 +846,11 @@ struct AboutView: View {
                 }
             }
             
+            let buildVersion = Bundle.main.object(forInfoDictionaryKey: "ISBuildVersion") as? String ?? "1.0.0"
             VStack(spacing: 3) {
                 Text("IdleSentry")
                     .font(.system(size: 20, weight: .bold))
-                Text("Version 1.0.0")
+                Text("Version \(buildVersion)")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -865,13 +866,24 @@ struct AboutView: View {
             Divider()
                 .frame(width: 160)
             
-            VStack(spacing: 2) {
-                Text("Crafted locally using Swift and SwiftUI.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                Text("Privacy First • Free Utility")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
+            VStack(spacing: 8) {
+                VStack(spacing: 2) {
+                    Text("Developer: Anush Vishwakarma")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Text("zennoris.com")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                }
+                
+                VStack(spacing: 2) {
+                    Text("Copyright © 2026 Zennoris. All rights reserved.")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.7))
+                    Text("Privacy First • Free Utility")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
             }
             
             Spacer()

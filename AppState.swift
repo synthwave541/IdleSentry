@@ -37,6 +37,10 @@ class AppState: ObservableObject {
     
     @Published var globalTimeout: Double = 300 {
         didSet {
+            let rounded = round(globalTimeout / 10.0) * 10.0
+            if rounded != globalTimeout {
+                globalTimeout = rounded
+            }
             AppState.defaults.set(globalTimeout, forKey: "globalTimeout")
         }
     }
