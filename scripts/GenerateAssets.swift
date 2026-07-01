@@ -139,11 +139,11 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     // Draw Sleek Hollow Keyhole in the center of the Shield (representing privacy/locking)
     let keyholePath = NSBezierPath()
     let kx = scx
-    let ky = scy + 20 * scale
-    let kR = 26 * scale // Slightly larger keyhole circle
+    let ky = scy + 30 * scale
+    let kR = 38 * scale // Bolder, larger keyhole circle
     
-    let slitBottomY = scy - 35 * scale
-    let slitBottomWidth = 14 * scale
+    let slitBottomY = scy - 65 * scale
+    let slitBottomWidth = 22 * scale
     
     // Create the keyhole shape as a single unified path (no overlapping internal lines)
     keyholePath.appendArc(withCenter: NSPoint(x: kx, y: ky), radius: kR, startAngle: 240, endAngle: -60, clockwise: true)
@@ -152,7 +152,7 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     keyholePath.close()
     
     khColor.setStroke()
-    keyholePath.lineWidth = 6 * scale
+    keyholePath.lineWidth = 8 * scale
     keyholePath.lineJoinStyle = .round
     keyholePath.stroke()
     
