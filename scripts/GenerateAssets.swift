@@ -54,11 +54,11 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
         NSGraphicsContext.current?.restoreGraphicsState()
     }
     
-    // --- DRAW SHIELD (Offset to top-left) ---
-    let scx = cx - 40.0 * scale
-    let scy = cy + 40.0 * scale
-    let sW = 380.0 * scale
-    let sH = 440.0 * scale
+    // --- DRAW SHIELD (Perfectly Centered) ---
+    let scx = cx
+    let scy = cy
+    let sW = 420.0 * scale
+    let sH = 480.0 * scale
     
     let shieldPath = NSBezierPath()
     // Start at top middle (slight dip)
@@ -149,18 +149,18 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     khSlit.close()
     khSlit.fill()
     
-    // --- DRAW CLOCK BADGE (Bottom-Right corner of shield) ---
-    let ccx = cx + 180.0 * scale
-    let ccy = cy - 160.0 * scale
-    let cR = 130.0 * scale
+    // --- DRAW CLOCK BADGE (Tiny on Bottom-Right corner of shield) ---
+    let ccx = cx + 220.0 * scale
+    let ccy = cy - 200.0 * scale
+    let cR = 85.0 * scale
     
     // Outer glow ring shadow
     NSGraphicsContext.current?.saveGraphicsState()
     if style != .tinted {
         let clockShadow = NSShadow()
         clockShadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
-        clockShadow.shadowOffset = NSSize(width: 4 * scale, height: -4 * scale)
-        clockShadow.shadowBlurRadius = 14 * scale
+        clockShadow.shadowOffset = NSSize(width: 3 * scale, height: -3 * scale)
+        clockShadow.shadowBlurRadius = 10 * scale
         clockShadow.set()
     }
     
@@ -172,30 +172,31 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     
     // Clock outer ring stroke
     clockColor.setStroke()
-    clockBG.lineWidth = 12 * scale
+    clockBG.lineWidth = 8 * scale
     clockBG.stroke()
     
     // Clock tick marks
     let ticks = NSBezierPath()
-    let tickLength = 22 * scale
+    let tickPadding = 5.0 * scale
+    let tickLength = 15.0 * scale
     
     // 12 o'clock
-    ticks.move(to: NSPoint(x: ccx, y: ccy + cR - 8*scale))
+    ticks.move(to: NSPoint(x: ccx, y: ccy + cR - tickPadding))
     ticks.line(to: NSPoint(x: ccx, y: ccy + cR - tickLength))
     
     // 6 o'clock
-    ticks.move(to: NSPoint(x: ccx, y: ccy - cR + 8*scale))
+    ticks.move(to: NSPoint(x: ccx, y: ccy - cR + tickPadding))
     ticks.line(to: NSPoint(x: ccx, y: ccy - cR + tickLength))
     
     // 3 o'clock
-    ticks.move(to: NSPoint(x: ccx + cR - 8*scale, y: ccy))
+    ticks.move(to: NSPoint(x: ccx + cR - tickPadding, y: ccy))
     ticks.line(to: NSPoint(x: ccx + cR - tickLength, y: ccy))
     
     // 9 o'clock
-    ticks.move(to: NSPoint(x: ccx - cR + 8*scale, y: ccy))
+    ticks.move(to: NSPoint(x: ccx - cR + tickPadding, y: ccy))
     ticks.line(to: NSPoint(x: ccx - cR + tickLength, y: ccy))
     
-    ticks.lineWidth = 8 * scale
+    ticks.lineWidth = 5 * scale
     ticks.lineCapStyle = .round
     clockColor.setStroke()
     ticks.stroke()
@@ -204,19 +205,19 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     let handsPath = NSBezierPath()
     // Center to 12 (Minute hand)
     handsPath.move(to: NSPoint(x: ccx, y: ccy))
-    handsPath.line(to: NSPoint(x: ccx, y: ccy + 75*scale))
+    handsPath.line(to: NSPoint(x: ccx, y: ccy + 50*scale))
     
     // Center to 2:30 (Hour hand)
     handsPath.move(to: NSPoint(x: ccx, y: ccy))
-    handsPath.line(to: NSPoint(x: ccx + 48*scale, y: ccy - 28*scale))
+    handsPath.line(to: NSPoint(x: ccx + 32*scale, y: ccy - 18*scale))
     
-    handsPath.lineWidth = 10 * scale
+    handsPath.lineWidth = 6 * scale
     handsPath.lineCapStyle = .round
     clockColor.setStroke()
     handsPath.stroke()
     
     // Center pin
-    let pinPath = NSBezierPath(ovalIn: NSRect(x: ccx - 12*scale, y: ccy - 12*scale, width: 24*scale, height: 24*scale))
+    let pinPath = NSBezierPath(ovalIn: NSRect(x: ccx - 8*scale, y: ccy - 8*scale, width: 16*scale, height: 16*scale))
     pinColor.setFill()
     pinPath.fill()
     
