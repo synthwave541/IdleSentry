@@ -48,6 +48,26 @@ echo "Assembling files..."
 cp -R "${APP_PATH}" dmg_staging/
 ln -s /Applications dmg_staging/Applications
 
+# Create Installation Guide to help users bypass Gatekeeper "damaged" error
+cat << 'EOF' > "dmg_staging/How to Install (Fix Error).txt"
+IdleSentry — Installation Guide
+==============================
+
+Because IdleSentry is an open-source project, it is signed locally (ad-hoc) and not notarized through Apple's developer program. 
+
+When you first open the app, macOS Gatekeeper might show an error saying:
+"IdleSentry is damaged and can't be opened." or "Apple cannot check it for malicious software."
+
+To fix this and run the app:
+1. Drag IdleSentry.app into your Applications folder.
+2. Open your Terminal app (Applications > Utilities > Terminal).
+3. Paste the following command and press Enter:
+
+   xattr -cr /Applications/IdleSentry.app
+
+This clears the macOS quarantine flag, and the app will open and run perfectly.
+EOF
+
 # Put the background image inside a hidden folder
 mkdir -p dmg_staging/.background
 cp background.png dmg_staging/.background/background.png
@@ -92,9 +112,10 @@ tell application "Finder"
         
         delay 1
         
-        -- Position the two items
+        -- Position the three items
         set position of item "${APP_NAME}.app" to {150, 190}
         set position of item "Applications" to {450, 190}
+        set position of item "How to Install (Fix Error).txt" to {300, 290}
         
         delay 1
         
@@ -117,6 +138,7 @@ tell application "Finder"
         
         set position of item "${APP_NAME}.app" to {150, 190}
         set position of item "Applications" to {450, 190}
+        set position of item "How to Install (Fix Error).txt" to {300, 290}
         
         delay 1
         close
