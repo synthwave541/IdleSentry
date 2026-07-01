@@ -136,21 +136,28 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     shieldPath.stroke()
     NSGraphicsContext.current?.restoreGraphicsState()
     
-    // Draw Sleek Keyhole in the center of the Shield (representing privacy/locking)
-    let khCircle = NSBezierPath(ovalIn: NSRect(x: scx - 18*scale, y: scy + 10*scale, width: 36*scale, height: 36*scale))
-    khColor.setFill()
-    khCircle.fill()
+    // Draw Sleek Hollow Keyhole in the center of the Shield (representing privacy/locking)
+    let keyholePath = NSBezierPath()
+    let kx = scx
+    let ky = scy + 20 * scale
+    let kR = 26 * scale // Slightly larger keyhole circle
     
-    let khSlit = NSBezierPath()
-    khSlit.move(to: NSPoint(x: scx - 12*scale, y: scy + 16*scale))
-    khSlit.line(to: NSPoint(x: scx + 12*scale, y: scy + 16*scale))
-    khSlit.line(to: NSPoint(x: scx + 6*scale, y: scy - 20*scale))
-    khSlit.line(to: NSPoint(x: scx - 6*scale, y: scy - 20*scale))
-    khSlit.close()
-    khSlit.fill()
+    let slitBottomY = scy - 35 * scale
+    let slitBottomWidth = 14 * scale
+    
+    // Create the keyhole shape as a single unified path (no overlapping internal lines)
+    keyholePath.appendArc(withCenter: NSPoint(x: kx, y: ky), radius: kR, startAngle: 240, endAngle: -60, clockwise: true)
+    keyholePath.line(to: NSPoint(x: kx + slitBottomWidth, y: slitBottomY))
+    keyholePath.line(to: NSPoint(x: kx - slitBottomWidth, y: slitBottomY))
+    keyholePath.close()
+    
+    khColor.setStroke()
+    keyholePath.lineWidth = 6 * scale
+    keyholePath.lineJoinStyle = .round
+    keyholePath.stroke()
     
     // --- DRAW CLOCK BADGE (Tiny on Bottom-Right corner of shield, overlapping) ---
-    let ccx = cx + 150.0 * scale
+    let ccx = cx + 125.0 * scale
     let ccy = cy - 170.0 * scale
     let cR = 85.0 * scale
     
