@@ -149,9 +149,9 @@ func drawAppIcon(size: CGFloat, style: IconStyle = .standard) -> NSImage {
     khSlit.close()
     khSlit.fill()
     
-    // --- DRAW CLOCK BADGE (Tiny on Bottom-Right corner of shield) ---
-    let ccx = cx + 220.0 * scale
-    let ccy = cy - 200.0 * scale
+    // --- DRAW CLOCK BADGE (Tiny on Bottom-Right corner of shield, overlapping) ---
+    let ccx = cx + 150.0 * scale
+    let ccy = cy - 170.0 * scale
     let cR = 85.0 * scale
     
     // Outer glow ring shadow
