@@ -824,25 +824,34 @@ struct AboutView: View {
         VStack(spacing: 14) {
             Spacer()
             
-            // Branding graphic
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [Color.accentColor, Color.accentColor.opacity(0.75)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 72, height: 72)
-                    .shadow(color: Color.accentColor.opacity(0.25), radius: 8, x: 0, y: 4)
-                
+            // Branding graphic (Actual AppIcon)
+            if let nsImage = NSImage(named: "AppIcon") {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 80, height: 80)
+                    .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
+            } else {
+                // Fallback graphic
                 ZStack {
-                    Image(systemName: "shield.fill")
-                        .font(.system(size: 34, weight: .medium))
-                        .foregroundColor(.white)
-                    Image(systemName: "clock.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white.opacity(0.85))
-                        .offset(y: 4)
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color.accentColor, Color.accentColor.opacity(0.75)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 72, height: 72)
+                        .shadow(color: Color.accentColor.opacity(0.25), radius: 8, x: 0, y: 4)
+                    
+                    ZStack {
+                        Image(systemName: "shield.fill")
+                            .font(.system(size: 34, weight: .medium))
+                            .foregroundColor(.white)
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+                            .offset(y: 4)
+                    }
                 }
             }
             
