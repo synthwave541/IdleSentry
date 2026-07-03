@@ -53,6 +53,15 @@ class AppState: ObservableObject {
         }
     }
     
+    /// When enabled, IdleSentry kills ALL processes matching the app's bundle identifier
+    /// (including helper/menu-bar processes that linger after a standard quit).
+    /// Disabled by default to preserve the safer standard-quit behavior.
+    @Published var fullyCloseApps: Bool = false {
+        didSet {
+            AppState.defaults.set(fullyCloseApps, forKey: "fullyCloseApps")
+        }
+    }
+    
     @Published var isMonitoring: Bool = true {
         didSet {
             AppState.defaults.set(isMonitoring, forKey: "isMonitoring")
@@ -183,6 +192,12 @@ class AppState: ObservableObject {
         
         // pauseOnSystemIdle removed
         self.quitMethod = d.integer(forKey: "quitMethod")
+        
+        if d.object(forKey: "fullyCloseApps") != nil {
+            self.fullyCloseApps = d.bool(forKey: "fullyCloseApps")
+        } else {
+            self.fullyCloseApps = false
+        }
         
         if d.object(forKey: "isMonitoring") != nil {
             self.isMonitoring = d.bool(forKey: "isMonitoring")
@@ -357,6 +372,16 @@ class AppState: ObservableObject {
             success = app.terminate()
         }
         
+        // Some apps leave behind helper or background processes that keep their menu-bar
+        // icon alive even after the main process terminates. When "Fully close the app" is
+        // enabled, kill every running process whose bundle identifier matches, ensuring
+        // the app is completely closed.
+        if fullyCloseApps, let bundleId = app.bundleIdentifier {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.terminateRemainingProcesses(forBundleId: bundleId, name: name)
+            }
+        }
+        
         if success {
             sendNotification(
                 title: "App Closed Automatically",
@@ -364,6 +389,25 @@ class AppState: ObservableObject {
             )
         } else {
             print("Failed to terminate \(name)")
+        }
+    }
+    
+    /// Terminates any remaining processes matching the given bundle identifier.
+    /// This catches helper/menu-bar processes that survive a standard quit.
+    private func terminateRemainingProcesses(forBundleId bundleId: String, name: String) {
+        let remaining = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier == bundleId && !$0.isTerminated
+        }
+        
+        guard !remaining.isEmpty else { return }
+        
+        print("IdleSentry: Fully closing \(remaining.count) lingering process(es) for \(name).")
+        for process in remaining {
+            // Force terminate lingering helpers — they've already had a chance to save
+            // during the initial standard/force quit of the main process.
+            if !process.forceTerminate() {
+                print("IdleSentry: Failed to fully terminate lingering process \(process.bundleIdentifier ?? "?")")
+            }
         }
     }
     

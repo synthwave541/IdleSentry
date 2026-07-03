@@ -488,6 +488,23 @@ struct GeneralSettingsView: View {
                     
                     Divider()
                     
+                    // Fully Close Apps
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Fully Close the App")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Some apps leave background processes running after quitting, keeping their icon alive. Enable this to terminate all matching processes and fully close the app.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $appState.fullyCloseApps)
+                            .toggleStyle(SwitchToggleStyle())
+                    }
+                    
+                    Divider()
+                    
                     // Termination Method
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Termination Method")
