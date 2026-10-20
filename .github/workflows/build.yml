@@ -16,12 +16,17 @@ jobs:
         run: bash tests/run-checks.sh
       - name: Build and verify universal app
         run: |
-          bash build.sh universal
+          bash package.sh
           python3 -c 'import subprocess; assert set(subprocess.check_output(["lipo", "-archs", "build/IdleSentry.app/Contents/MacOS/IdleSentry"], text=True).split()) == {"arm64", "x86_64"}'
           codesign --verify --deep --strict build/IdleSentry.app
-          ditto -c -k --sequesterRsrc --keepParent build/IdleSentry.app build/IdleSentry-macOS.zip
+          VERSION=$(tr -d '\r\n' < VERSION)
+          ditto -c -k --sequesterRsrc --keepParent build/IdleSentry.app "IdleSentry-${VERSION}-macOS.zip"
+          shasum -a 256 "IdleSentry-${VERSION}.dmg" "IdleSentry-${VERSION}-macOS.zip" > SHA256SUMS.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: IdleSentry-macOS-universal
-          path: build/IdleSentry-macOS.zip
+          name: IdleSentry-macOS-release
+          path: |
+            IdleSentry-*.dmg
+            IdleSentry-*-macOS.zip
+            SHA256SUMS.txt
           if-no-files-found: error
