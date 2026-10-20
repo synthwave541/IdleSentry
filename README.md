@@ -1,72 +1,73 @@
-# IdleSentry
+# IdleSentry for macOS
 
-A native, lightweight utility that automatically terminates sensitive applications when your machine goes idle, keeping your active workspace private from prying eyes.
+A native menu-bar utility that quits the applications you choose when your Mac is idle. Monitoring and preferences stay on your Mac; no account or activity upload is involved.
 
----
+## Everyday use
 
-## The Problem
-Imagine you're at the office, a coffee shop, or working around family. Your boss calls you suddenly, or you step away for a quick break. You don't lock your screen in time, leaving Slack, browser tabs, password managers, or sensitive documents fully exposed. 
+1. Open **IdleSentry → Add Apps** (⌘N), search for applications, and select the ones to monitor. Running apps appear first. **Browse…** lets you select apps elsewhere on your Mac.
+2. Choose a default timeout in **Inactivity Rules**.
+3. Leave monitoring enabled on the **Dashboard**. Keyboard or mouse activity resets the timer.
 
-**IdleSentry** solves this. It runs quietly in the menu bar, monitors user inactivity, and automatically terminates pre-configured sensitive apps once a custom countdown expires.
+The Dashboard summarizes monitored apps, running apps, timeout, and quit method. A neutral countdown card in the sidebar shows the next app to close, with a muted amber clock icon. Long names truncate to one line with a hover label; “+N more” summarizes additional apps. Click the card to inspect the full scrollable closing queue, ordered by next deadline. The list remains available when input resets the countdown. The small red badge counts running monitored apps and disappears at zero.
 
----
+Closing the window leaves IdleSentry running in the menu bar. Choose **Quit IdleSentry** to exit. **System & Startup** includes launch-at-login and Accessibility settings. The window is resizable and remembers its size.
 
-## Features
+### What “idle” means
 
-- **Native & Lightweight**: Built with native Swift and SwiftUI. Run-time footprint is minimal (near-zero CPU, tiny memory footprint).
-- **Custom Inactivity Timer**: Enforce a global inactivity threshold before countdown triggering.
-- **Targeted Protection**: Only terminates the specific applications you configure.
-- **Quit Behaviors**: Choose between **Standard Quit** (safely lets apps save data) or **Force Quit** (instant process termination).
-- **Launch on Startup**: Native login item support (`SMAppService`) to keep you protected automatically.
-- **Privacy First**: operates 100% locally on your machine. No telemetry, no analytic trackers, and no internet access required.
+The timeout uses system-wide keyboard and mouse inactivity, after a brief 1.25-second grace period. All running monitored apps are eligible, including the frontmost app. It does not measure how long an individual app has been in the background. Saved per-app timeout overrides are preserved.
 
----
+### Quit methods
 
-## Installation & Gatekeeper Note
+- **Standard Quit** requests a normal application quit. An app can show a save prompt or refuse to close; saving and exit are not guaranteed.
+- **Force Quit** requests immediate termination. Unsaved changes can be lost.
+- **Close remaining background processes** optionally force-terminates remaining processes with the same bundle identifier 0.4 seconds after the initial request. This can interrupt saving. Helpers with different identifiers are not covered by that exact match.
 
-Because IdleSentry is free and open-source, it is signed locally (ad-hoc) rather than using a paid Apple Developer certificate. On first launch, macOS Gatekeeper will block execution with a warning.
+Save your work before testing automatic closing. Pause monitoring whenever you want your selected apps to remain open.
 
-To bypass this and run the app:
-1. Download the latest release `.dmg` from the **Releases** tab.
-2. Drag **IdleSentry.app** to your **Applications** folder.
-3. Open your Terminal and run the following command to clear the quarantine flag:
-   ```bash
-   xattr -cr /Applications/IdleSentry.app
-   ```
-4. Launch the app normally.
+## Requirements and installation
 
-*Requires macOS 13.0 (Ventura) or later.*
+Requires **macOS 13 Ventura or later**. The build script supports host-native, Apple Silicon, Intel, and universal builds.
 
----
+Download a DMG from [Releases](https://github.com/synthwave541/IdleSentry/releases), then drag IdleSentry.app to Applications. Current public builds use an ad-hoc signature rather than Developer ID notarization, so macOS may require an explicit first-open approval.
 
-## Compiling from Source
+Preferences use `~/Library/Preferences/com.zennoris.IdleSentry.plist`. The UI update retains the existing preference keys and monitored-app format.
 
-You can easily build the project yourself using the included build tools:
+## Build from source
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/synthwave541/IdleSentry.git
-   cd IdleSentry
-   ```
-2. Build the app bundle:
-   ```bash
-   ./build.sh
-   ```
-3. Generate the distribution installer package:
-   ```bash
-   ./package.sh
-   ```
-   *Note: Building from source automatically marks the application as a **Custom Build** (`1.0.0-custom`) for security and integrity.*
+Use Xcode or the Xcode Command Line Tools with the macOS SDK, then run from this directory:
 
----
+```sh
+bash build.sh universal
+```
 
-## Windows Version
-A native Windows port (supporting standard Windows PCs, 32-bit x86, and Qualcomm/Snapdragon ARM64 machines) is currently under active development. Stay tuned!
+The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.14). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project or third-party runtime is required.
 
----
+To create a universal DMG, run `bash package.sh`; it invokes the build through Bash. The packaging script interacts with Finder and mounted disk images. Packaging is separate from publishing a GitHub release.
 
-## License
+### Isolated UI preview
 
-Distributed under the **Apache License 2.0**. 
+Launch the built executable with `--ui-preview` to use sample applications:
 
-*The name "IdleSentry" and the shield/clock branding assets are trademarks. You are free to fork the codebase and distribute custom builds, but you cannot distribute them under the name "IdleSentry" or use the official branding without permission.*
+```sh
+build/IdleSentry.app/Contents/MacOS/IdleSentry --ui-preview
+```
+
+This mode does not load or save your preferences, monitor or terminate apps, request permissions, or register login items. The Preview menu offers ready/countdown/many-app/paused/empty/waiting states, app-only light/dark appearance, and window sizes for visual QA. Those controls are absent from normal launches.
+
+### Checks
+
+```sh
+bash tests/run-checks.sh
+```
+
+Checks cover presentation priority, timer formatting, isolated preview mutations, stored-settings compatibility, and installed-app discovery. They do not close real applications or change system permissions.
+
+## Windows
+
+The native Windows port is available separately for **x64 and ARM64**: [IdleSentry for Windows](https://github.com/synthwave541/IdleSentryForWindows). The two apps use their own native UI and build tools.
+
+## Credits and license
+
+Created by **Anush Vishwakarma / [Zennoris](https://zennoris.com)**. Distributed under the **Apache License 2.0**; see [LICENSE](LICENSE).
+
+The IdleSentry name and shield/clock branding are trademarks. Forks may use the code under its license; permission is required to distribute them using the official name or branding.

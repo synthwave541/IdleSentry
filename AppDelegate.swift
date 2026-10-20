@@ -71,36 +71,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         
         menu.addItem(NSMenuItem.separator())
         
-        // Monitored Apps list with remaining times
+        let phase = appState.monitoringPhase
+        let summary = NSMenuItem(title: phase.isCountingDown ? "\(phase.subtitle) · \(phase.title)" : phase.title,
+                                 action: nil, keyEquivalent: "")
+        summary.isEnabled = false
+        menu.addItem(summary)
         if !appState.runningStates.isEmpty {
-            let appsHeader = NSMenuItem(title: "Monitored Apps:", action: nil, keyEquivalent: "")
-            appsHeader.isEnabled = false
-            menu.addItem(appsHeader)
-            
+            menu.addItem(NSMenuItem.separator())
             for state in appState.runningStates {
-                let statusText: String
-                if state.isRunning {
-                    if state.isFrontmost {
-                        statusText = "Active"
-                    } else {
-                        let secs = Int(state.timeRemaining)
-                        let mins = secs / 60
-                        let remainingSecs = secs % 60
-                        statusText = String(format: "%02d:%02d", mins, remainingSecs)
-                    }
-                } else {
-                    statusText = "Not Running"
-                }
-                
-                let item = NSMenuItem(title: "  \(state.name) (\(statusText))", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: "\(state.name) · \(state.isRunning ? "Running" : "Not running")",
+                                      action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 menu.addItem(item)
             }
-            
-            menu.addItem(NSMenuItem.separator())
         }
-        
-        menu.addItem(NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ","))
+        menu.addItem(NSMenuItem.separator())
+
+        menu.addItem(NSMenuItem(title: "Open IdleSentry…", action: #selector(showPreferences), keyEquivalent: ","))
         
         menu.addItem(NSMenuItem.separator())
         
@@ -117,11 +104,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             
             // Create a window that looks modern and clean
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 680, height: 480),
-                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                contentRect: NSRect(x: 0, y: 0, width: 1040, height: 740),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
+            window.contentMinSize = NSSize(width: 800, height: 560)
             window.center()
             
             // Build version from Info.plist
@@ -137,9 +125,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             }
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
+            window.toolbarStyle = .unified
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.contentView = NSHostingView(rootView: contentView)
+            window.contentViewController = NSHostingController(rootView: contentView)
+            // Restore after hosting establishes its fitting size, then remember future resizes.
+            let frameName = appState.isPreview ? "IdleSentry.PreviewWindow" : "IdleSentry.MainWindow"
+            if !window.setFrameUsingName(frameName) {
+                window.setContentSize(NSSize(width: 1040, height: 740))
+                window.center()
+            }
+            window.setFrameAutosaveName(frameName)
             
             self.preferencesWindow = window
         }
@@ -165,6 +161,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let appMenu = NSMenu(title: "IdleSentry")
         appMenu.addItem(NSMenuItem(title: "About IdleSentry", action: #selector(showAbout), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(showRules), keyEquivalent: ","))
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Hide IdleSentry", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Quit IdleSentry", action: #selector(quitApp), keyEquivalent: "q"))
@@ -187,13 +185,91 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
         
+        let viewMenu = NSMenu(title: "View")
+        let sidebarItem = NSMenuItem(title: "Toggle Sidebar", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
+        sidebarItem.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(sidebarItem)
+        let viewItem = NSMenuItem()
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
+
+        if appState.isPreview {
+            let previewMenu = NSMenu(title: "Preview")
+            for scenario in ["Ready", "Countdown", "Many Apps", "Paused", "Empty", "Waiting"] {
+                let item = NSMenuItem(title: scenario, action: #selector(previewScenario(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = scenario
+                previewMenu.addItem(item)
+            }
+            previewMenu.addItem(.separator())
+            for appearance in ["System", "Light", "Dark"] {
+                let item = NSMenuItem(title: appearance, action: #selector(previewAppearance(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = appearance
+                previewMenu.addItem(item)
+            }
+            previewMenu.addItem(.separator())
+            for size in ["Compact Window", "Default Window", "Large Window"] {
+                let item = NSMenuItem(title: size, action: #selector(previewWindowSize(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = size
+                previewMenu.addItem(item)
+            }
+            let item = NSMenuItem()
+            item.submenu = previewMenu
+            mainMenu.addItem(item)
+        }
         NSApp.mainMenu = mainMenu
     }
     
     @objc func showAbout() {
-        NSApp.orderFrontStandardAboutPanel(nil)
+        showPreferences()
+        NotificationCenter.default.post(name: .sentryShowAbout, object: nil)
     }
     
+    @objc func showRules() {
+        showPreferences()
+        NotificationCenter.default.post(name: .sentryShowRules, object: nil)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showPreferences()
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        appState.stopTimer()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+    }
+
+    @objc private func previewScenario(_ sender: NSMenuItem) {
+        guard appState.isPreview, let scenario = sender.representedObject as? String else { return }
+        appState.applyPreviewScenario(scenario)
+    }
+
+    @objc private func previewAppearance(_ sender: NSMenuItem) {
+        guard appState.isPreview, let name = sender.representedObject as? String else { return }
+        NSApp.appearance = name == "System" ? nil : NSAppearance(named: name == "Dark" ? .darkAqua : .aqua)
+    }
+
+    @objc private func previewWindowSize(_ sender: NSMenuItem) {
+        guard appState.isPreview, let name = sender.representedObject as? String else { return }
+        let size = name == "Compact Window" ? NSSize(width: 800, height: 560)
+            : name == "Large Window" ? NSSize(width: 1200, height: 860) : NSSize(width: 1040, height: 740)
+        preferencesWindow?.setContentSize(size)
+        preferencesWindow?.center()
+    }
+
     func windowWillClose(_ notification: Notification) {
         // Demote back to accessory so it hides from the Dock and sits only in the menu bar
         NSApp.setActivationPolicy(.accessory)

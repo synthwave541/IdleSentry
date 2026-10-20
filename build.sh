@@ -19,6 +19,21 @@ else
     BUILD_TYPE="custom"
 fi
 
+# The tracked product version takes precedence over machine-local build metadata.
+if [ -f "VERSION" ]; then
+    VERSION=$(tr -d '\r\n' < VERSION)
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: VERSION must contain a semantic version such as 1.0.14." >&2
+    exit 1
+fi
+BUILD_ARCH="${1:-native}"
+case "$BUILD_ARCH" in
+    native) BUILD_ARCH=$(uname -m) ;;
+    arm64|x86_64|universal) ;;
+    *) echo "Usage: bash build.sh [native|arm64|x86_64|universal]" >&2; exit 1 ;;
+esac
+
 if [ "${BUILD_NUMBER}" = "custom" ]; then
     IS_BUILD_VERSION="${VERSION}-custom"
 else
@@ -53,7 +68,7 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${VERSION}</string>
     <key>CFBundleDisplayName</key>
     <string>${APP_NAME}</string>
     <key>LSMinimumSystemVersion</key>
@@ -63,7 +78,7 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAccessibilityUsageDescription</key>
-    <string>IdleSentry uses Accessibility to detect system idle time and pause app timers when you step away from the computer.</string>
+    <string>IdleSentry uses system activity information for its inactivity timer. It does not record what you type.</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>ISBuildVersion</key>
@@ -75,21 +90,25 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
 EOF
 
 echo "Compiling Swift source files..."
-SWIFT_FILES=$(find . -maxdepth 1 -name "*.swift")
-
-if [ -z "${SWIFT_FILES}" ]; then
+SWIFT_FILES=(./*.swift)
+if [ ! -f "${SWIFT_FILES[0]}" ]; then
     echo "Error: No Swift files found!"
     exit 1
 fi
-
 SDK_PATH=$(xcrun --show-sdk-path)
-ARCH=$(uname -m)
-
-swiftc -O \
-    -sdk "${SDK_PATH}" \
-    -target "${ARCH}-apple-macos13.0" \
-    -o "${MACOS_DIR}/${APP_NAME}" \
-    ${SWIFT_FILES}
+if [ "$BUILD_ARCH" = "universal" ]; then
+    COMPILE_DIR=$(mktemp -d "${BUILD_DIR}/.compile.XXXXXX")
+    trap 'rm -rf "$COMPILE_DIR"' EXIT
+    for build_arch in arm64 x86_64; do
+        swiftc -O -sdk "$SDK_PATH" -target "${build_arch}-apple-macos13.0" \
+            -o "${COMPILE_DIR}/${APP_NAME}-${build_arch}" "${SWIFT_FILES[@]}"
+    done
+    lipo -create "${COMPILE_DIR}/${APP_NAME}-arm64" "${COMPILE_DIR}/${APP_NAME}-x86_64" \
+        -output "${MACOS_DIR}/${APP_NAME}"
+else
+    swiftc -O -sdk "$SDK_PATH" -target "${BUILD_ARCH}-apple-macos13.0" \
+        -o "${MACOS_DIR}/${APP_NAME}" "${SWIFT_FILES[@]}"
+fi
 
 echo "Copying AppIcon assets to Resources..."
 for icon in AppIcon.icns AppIcon-clear.icns AppIcon-tinted.icns; do

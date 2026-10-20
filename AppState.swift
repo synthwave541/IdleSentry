@@ -24,6 +24,8 @@ struct AppRunningState: Identifiable, Equatable {
 }
 
 class AppState: ObservableObject {
+    /// UI previews never read/write user preferences, register login items, or monitor processes.
+    let isPreview: Bool
     // All settings stored under the bundle identifier domain so AppCleaner can find them
     // Location: ~/Library/Preferences/com.zennoris.IdleSentry.plist
     private static let defaults = UserDefaults(suiteName: "com.zennoris.IdleSentry") ?? UserDefaults.standard
@@ -41,7 +43,7 @@ class AppState: ObservableObject {
             if rounded != globalTimeout {
                 globalTimeout = rounded
             }
-            AppState.defaults.set(globalTimeout, forKey: "globalTimeout")
+            if !isPreview { AppState.defaults.set(globalTimeout, forKey: "globalTimeout") }
         }
     }
     
@@ -49,7 +51,7 @@ class AppState: ObservableObject {
     
     @Published var quitMethod: Int = 0 {
         didSet {
-            AppState.defaults.set(quitMethod, forKey: "quitMethod")
+            if !isPreview { AppState.defaults.set(quitMethod, forKey: "quitMethod") }
         }
     }
     
@@ -58,13 +60,13 @@ class AppState: ObservableObject {
     /// Disabled by default to preserve the safer standard-quit behavior.
     @Published var fullyCloseApps: Bool = false {
         didSet {
-            AppState.defaults.set(fullyCloseApps, forKey: "fullyCloseApps")
+            if !isPreview { AppState.defaults.set(fullyCloseApps, forKey: "fullyCloseApps") }
         }
     }
     
     @Published var isMonitoring: Bool = true {
         didSet {
-            AppState.defaults.set(isMonitoring, forKey: "isMonitoring")
+            if !isPreview { AppState.defaults.set(isMonitoring, forKey: "isMonitoring") }
             reEvaluateTimerState()
         }
     }
@@ -98,6 +100,7 @@ class AppState: ObservableObject {
     }
     @Published var launchAtStartup: Bool = false {
         didSet {
+            guard !isPreview else { return }
             let isCurrentlyEnabled = SMAppService.mainApp.status == .enabled
             if launchAtStartup != isCurrentlyEnabled {
                 toggleLaunchAtStartup(launchAtStartup)
@@ -109,7 +112,13 @@ class AppState: ObservableObject {
     private var appStatesDict: [String: Double] = [:]
     private var cancellables = Set<AnyCancellable>()
     
-    init() {
+    init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--ui-preview") ||
+         Bundle.main.object(forInfoDictionaryKey: "ISPreviewMode") as? Bool == true) {
+        isPreview = preview
+        if preview {
+            applyPreviewScenario("Ready")
+            return
+        }
         loadSettings()
         requestNotificationPermission()
         isAccessibilityGranted = AXIsProcessTrusted()
@@ -136,6 +145,7 @@ class AppState: ObservableObject {
     
     /// Evaluates if any of the monitored applications are currently running, and starts/stops the timer accordingly.
     func reEvaluateTimerState() {
+        guard !isPreview else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
@@ -166,17 +176,20 @@ class AppState: ObservableObject {
     
     /// Explicitly check and publish accessibility permission status
     func checkAccessibility() {
+        guard !isPreview else { return }
         isAccessibilityGranted = AXIsProcessTrusted()
     }
     
     /// Prompt the user to grant accessibility access and open System Settings
     func requestAccessibility() {
+        guard !isPreview else { return }
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let _ = AXIsProcessTrustedWithOptions(options)
     }
     
     /// Open System Settings directly to the Accessibility privacy pane
     func openAccessibilitySettings() {
+        guard !isPreview else { return }
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
     }
@@ -216,6 +229,7 @@ class AppState: ObservableObject {
     }
     
     private func saveApps() {
+        guard !isPreview else { return }
         if let encoded = try? JSONEncoder().encode(monitoredApps) {
             AppState.defaults.set(encoded, forKey: "monitoredApps")
         }
@@ -243,6 +257,7 @@ class AppState: ObservableObject {
     }
     
     func startTimer() {
+        guard !isPreview else { return }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.tick()
@@ -296,6 +311,14 @@ class AppState: ObservableObject {
     }
     
     private func updateStates(effectiveIdle: Double = 0) {
+        if isPreview {
+            runningStates = monitoredApps.map { app in
+                runningStates.first { $0.bundleIdentifier == app.bundleIdentifier } ??
+                AppRunningState(name: app.name, bundleIdentifier: app.bundleIdentifier, path: app.path,
+                                isRunning: false, isFrontmost: false, timeRemaining: globalTimeout)
+            }
+            return
+        }
         let runningApps = NSWorkspace.shared.runningApplications
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         
@@ -443,6 +466,36 @@ class AppState: ObservableObject {
                     print("Failed to unregister login item: \(error)")
                 }
             }
+        }
+    }
+
+    /// Deterministic sample data for visual QA. Never invoked by a regular app launch.
+    func applyPreviewScenario(_ scenario: String) {
+        guard isPreview else { return }
+        globalTimeout = 300
+        isMonitoring = scenario != "Paused"
+        isCountdownActive = scenario == "Countdown" || scenario == "Many Apps"
+        var samples = [
+            ("Safari", "com.apple.Safari", "/Applications/Safari.app"),
+            ("Notes", "com.apple.Notes", "/System/Applications/Notes.app"),
+            ("TextEdit", "com.apple.TextEdit", "/System/Applications/TextEdit.app")
+        ]
+        let many = scenario == "Many Apps"
+        if many {
+            samples[0].0 = "Safari — Research, Reading & Work Profiles"
+            for index in 4...24 {
+                samples.append(("Sample Application \(index)", "preview.application.\(index)", "/System/Applications/Preview.app"))
+            }
+        }
+        monitoredApps = scenario == "Empty" ? [] : samples.enumerated().map { index, sample in
+            MonitoredApp(name: sample.0, bundleIdentifier: sample.1, path: sample.2,
+                         customTimeout: many ? globalTimeout + Double(index) * 15 : nil)
+        }
+        appStatesDict = Dictionary(uniqueKeysWithValues: monitoredApps.map { ($0.bundleIdentifier, $0.customTimeout ?? globalTimeout) })
+        runningStates = monitoredApps.enumerated().map { index, app in
+            AppRunningState(name: app.name, bundleIdentifier: app.bundleIdentifier, path: app.path,
+                            isRunning: scenario != "Waiting" && (many || index < 2), isFrontmost: index == 0,
+                            timeRemaining: many ? 50 + Double(index) * 15 : scenario == "Countdown" ? 50 : globalTimeout)
         }
     }
 }

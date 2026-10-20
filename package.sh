@@ -16,6 +16,10 @@ else
     BUILD_TYPE="custom"
 fi
 
+if [ -f "VERSION" ]; then
+    VERSION=$(tr -d '\r\n' < VERSION)
+fi
+
 if [ "${BUILD_NUMBER}" = "custom" ]; then
     DMG_NAME="${APP_NAME}-custom.dmg"
     DISPLAY_BUILD="${VERSION}-custom"
@@ -35,7 +39,7 @@ echo "→ Building release type: ${BUILD_TYPE}"
 
 echo ""
 echo "Rebuilding app for packaging..."
-./build.sh
+bash ./build.sh universal
 
 echo "Preparing DMG staging area..."
 # Detach any previously mounted volume with the same name
