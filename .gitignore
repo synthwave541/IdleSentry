@@ -18,3 +18,7 @@ package-personal.sh
 version.info
 current_version.info
 build_hashes.info
+
+# Release packages and generated checksums
+IdleSentry-*-macOS.zip
+SHA256SUMS.txt

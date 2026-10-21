@@ -42,7 +42,7 @@ bash build.sh universal
 
 The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.14). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project or third-party runtime is required.
 
-To create a universal DMG, run `bash package.sh`; it invokes the build through Bash. The packaging script interacts with Finder and mounted disk images. Packaging is separate from publishing a GitHub release.
+To create a universal DMG, app ZIP, and SHA-256 checksums, run `bash package.sh`. Both packages include `FIX LAUNCH ERROR.txt`, with the targeted quarantine command first and an explanation of signing and first-launch approval. Packaging uses command-line tools without Finder automation and is separate from publishing a GitHub release.
 
 ### Isolated UI preview
 
