@@ -40,7 +40,7 @@ Use Xcode or the Xcode Command Line Tools with the macOS SDK, then run from this
 bash build.sh universal
 ```
 
-The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.14). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project or third-party runtime is required.
+The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.15). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project is required. The build downloads a pinned Sparkle 2.10.0 framework and verifies its checksum.
 
 To create a universal DMG, app ZIP, and SHA-256 checksums, run `bash package.sh`. Both packages include `FIX LAUNCH ERROR.txt`, with the targeted quarantine command first and an explanation of signing and first-launch approval. Packaging uses command-line tools without Finder automation and is separate from publishing a GitHub release.
 
@@ -71,3 +71,13 @@ The native Windows port is available separately for **x64 and ARM64**: [IdleSent
 Created by **Anush Vishwakarma / [Zennoris](https://zennoris.com)**. Distributed under the **Apache License 2.0**; see [LICENSE](LICENSE).
 
 The IdleSentry name and shield/clock branding are trademarks. Forks may use the code under its license; permission is required to distribute them using the official name or branding.
+
+## Updates (1.0.15+)
+
+Use **Check for Updates…** from the menu bar or **About → Software updates**. Automatic checks run daily and can be disabled in About. Downloads and installation require approval; Sparkle shows progress and restarts IdleSentry after installing. Monitoring and preferences stay local; only release metadata and packages are requested from GitHub. System profiling and unattended installs are disabled.
+
+Update archives and the feed use Ed25519 signatures. This is separate from Apple Developer ID signing and does not remove first-install Gatekeeper warnings. The signing key is stored in the release Mac’s login Keychain, account `com.zennoris.IdleSentry`; only its public key is committed. Preserve/back up this key securely using Sparkle’s `generate_keys` tool before replacing the release Mac. Never commit the private key.
+
+To publish future updates, bump `VERSION`, run `bash package.sh`, then `bash scripts/make-appcast.sh` on the release Mac. Upload the DMG, macOS ZIP, `SHA256SUMS.txt` and **appcast.xml** to the matching stable GitHub release in this repository. The appcast download prefix uses the exact version tag (without `v`). Publish all assets together, then make that release the latest release. Do not edit a signed appcast after generating it. CI builds packages but cannot sign the feed without the release key.
+
+Existing 1.0.14 users install 1.0.15 manually once; their preferences are retained. Local checks: `bash tests/run-checks.sh`.

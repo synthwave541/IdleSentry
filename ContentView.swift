@@ -79,7 +79,7 @@ struct ContentView: View {
                 case .system:
                     SystemSettingsView(appState: appState)
                 case .about:
-                    AboutView()
+                    AboutView(preview: appState.isPreview)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation {
     var statusItem: NSStatusItem?
     var preferencesWindow: NSWindow?
     let appState = AppState()
@@ -26,6 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             }
             .store(in: &cancellables)
         
+        UpdateService.shared.start(preview: appState.isPreview)
         setupMenu()
         
         // Only show preferences window if NOT launched as a login item
@@ -88,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(NSMenuItem(title: "Open IdleSentry…", action: #selector(showPreferences), keyEquivalent: ","))
+        menu.addItem(updateMenuItem())
         
         menu.addItem(NSMenuItem.separator())
         
@@ -160,6 +162,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         // App Menu
         let appMenu = NSMenu(title: "IdleSentry")
         appMenu.addItem(NSMenuItem(title: "About IdleSentry", action: #selector(showAbout), keyEquivalent: ""))
+        appMenu.addItem(updateMenuItem())
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(showRules), keyEquivalent: ","))
         appMenu.addItem(NSMenuItem.separator())
@@ -230,6 +233,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         NSApp.mainMenu = mainMenu
     }
     
+    private func updateMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = !appState.isPreview && UpdateService.shared.canCheck
+        return item
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(checkForUpdates) {
+            return !appState.isPreview && UpdateService.shared.canCheck
+        }
+        return true
+    }
+
+    @objc func checkForUpdates() {
+        guard !appState.isPreview else { return }
+        UpdateService.shared.check()
+    }
+
     @objc func showAbout() {
         showPreferences()
         NotificationCenter.default.post(name: .sentryShowAbout, object: nil)

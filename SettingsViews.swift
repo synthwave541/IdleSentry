@@ -148,6 +148,7 @@ struct SystemSettingsView: View {
 }
 
 struct AboutView: View {
+    var preview = false
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
@@ -173,6 +174,7 @@ struct AboutView: View {
                     Link("Source Code", destination: URL(string: "https://github.com/synthwave541/IdleSentry")!)
                         .buttonStyle(.bordered)
                 }
+                UpdateSettingsView(preview: preview)
                 Divider().frame(maxWidth: 300).padding(.vertical, 6)
                 VStack(spacing: 8) {
                     Text("Made by Anush Vishwakarma").font(.system(size: 12, weight: .medium))

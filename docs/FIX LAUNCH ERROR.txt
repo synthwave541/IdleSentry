@@ -42,4 +42,4 @@ IF YOU GET AN ERROR
 
 OFFICIAL SOURCE AND DOWNLOADS
 https://github.com/synthwave541/IdleSentry
-https://github.com/synthwave541/IdleSentry/releases/tag/1.0.14
+https://github.com/synthwave541/IdleSentry/releases/tag/1.0.15

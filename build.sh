@@ -45,6 +45,9 @@ if [ ! -f "AppIcon.icns" ] || [ ! -f "background.png" ]; then
     swift scripts/GenerateAssets.swift
 fi
 
+bash scripts/fetch-sparkle.sh
+SPARKLE_DIR="$PWD/build/dependencies/Sparkle-2.10.0"
+
 echo "Creating bundle directory structure..."
 mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
@@ -81,6 +84,24 @@ cat <<EOF > "${APP_DIR}/Contents/Info.plist"
     <string>IdleSentry uses system activity information for its inactivity timer. It does not record what you type.</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/synthwave541/IdleSentry/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>lyM3/KqDg9DZtxl6TruOnN3MrzwCp8JVCd7sx2c9TYM=</string>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>ISBuildVersion</key>
     <string>${IS_BUILD_VERSION}</string>
     <key>ISBuildType</key>
@@ -100,13 +121,13 @@ if [ "$BUILD_ARCH" = "universal" ]; then
     COMPILE_DIR=$(mktemp -d "${BUILD_DIR}/.compile.XXXXXX")
     trap 'rm -rf "$COMPILE_DIR"' EXIT
     for build_arch in arm64 x86_64; do
-        swiftc -O -sdk "$SDK_PATH" -target "${build_arch}-apple-macos13.0" \
+        swiftc -O -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -sdk "$SDK_PATH" -target "${build_arch}-apple-macos13.0" \
             -o "${COMPILE_DIR}/${APP_NAME}-${build_arch}" "${SWIFT_FILES[@]}"
     done
     lipo -create "${COMPILE_DIR}/${APP_NAME}-arm64" "${COMPILE_DIR}/${APP_NAME}-x86_64" \
         -output "${MACOS_DIR}/${APP_NAME}"
 else
-    swiftc -O -sdk "$SDK_PATH" -target "${BUILD_ARCH}-apple-macos13.0" \
+    swiftc -O -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks -sdk "$SDK_PATH" -target "${BUILD_ARCH}-apple-macos13.0" \
         -o "${MACOS_DIR}/${APP_NAME}" "${SWIFT_FILES[@]}"
 fi
 
@@ -117,7 +138,10 @@ for icon in AppIcon.icns AppIcon-clear.icns AppIcon-tinted.icns; do
     fi
 done
 
+mkdir -p "${APP_DIR}/Contents/Frameworks"
+ditto "$SPARKLE_DIR/Sparkle.framework" "${APP_DIR}/Contents/Frameworks/Sparkle.framework"
+
 echo "Signing application bundle..."
-codesign --force --deep --sign - "${APP_DIR}"
+codesign --force --sign - "${APP_DIR}"
 
 echo "Build successful! Created ${APP_DIR}"
