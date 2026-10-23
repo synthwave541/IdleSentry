@@ -51,7 +51,7 @@ Use Xcode 26 or later with the macOS SDK (adaptive icon compilation requires the
 bash build.sh universal
 ```
 
-The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.18; public installer release published separately). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project is required. The build downloads a pinned Sparkle 2.10.0 framework and verifies its checksum.
+The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.18). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project is required. The build downloads a pinned Sparkle 2.10.0 framework and verifies its checksum.
 
 To create a universal DMG, app ZIP, and SHA-256 checksums, run `bash package.sh`. Both packages include `FIX LAUNCH ERROR.txt`, with the targeted quarantine command first and an explanation of signing and first-launch approval. Packaging uses command-line tools without Finder automation and is separate from publishing a GitHub release.
 

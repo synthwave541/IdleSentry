@@ -1,6 +1,6 @@
 # Release history
 
-## 1.0.18 — Unreleased
+## 1.0.18 — 2026-10-24
 
 - Add Hide alongside Standard Quit and Force Quit, with per-app action overrides and compatible legacy settings. Hidden apps keep their work open and leave the Hide countdown.
 - Add a dedicated unsaved-work fallback card: Leave open (default), Hide, or explicit Force Quit. Enable it only for the default Standard Quit action; retain its selection while disabled. Require a recognized save decision rather than a slow or refused quit.

@@ -12,7 +12,7 @@ Use `IdleSentry-1.0.18.dmg` or `build/IdleSentry.app`. This is the real universa
 6. In Inactivity Rules → When an app reports unsaved work, verify the default is Leave open. Grant Accessibility if you choose to test the fallback. Select Standard Quit plus fallback Hide, and use a disposable edited document with a recognized English save warning. After the warning appears, the app should hide with its document and warning intact; restore it from the Dock. With no Accessibility permission or an unsupported warning, it should remain open. Only test fallback Force Quit on disposable changes; it intentionally discards them. Resume input or pause monitoring while waiting: no fallback should run.
 7. Quit and replace the prior test installation with this rebuilt app, then relaunch. Enable close notifications in System & Startup and let a disposable monitored app close through inactivity. Check that the leading sender icon is IdleSentry’s actual logo, with no right-side thumbnail. The notification must remain silent.
 8. With the real app window open, check its Dock icon using System Settings → Appearance → Icon & widget style. Verify Default, Dark, Clear, and Tinted. Close and reopen IdleSentry’s window to exercise its menu-bar/Dock transition. Restore your preferred system appearance afterwards.
-9. Check About reports 1.0.18. No GitHub release or update feed has been published. Check for Updates should continue to see the existing public feed until release approval.
+9. Check About reports 1.0.18. After publication, Check for Updates in 1.0.15 should offer 1.0.18 through the signed feed. Source and local checks do not exercise the complete interactive Sparkle installation flow.
 
 ## Automated/local validation
 
@@ -57,3 +57,7 @@ The user confirmed the active-input Watching for inactivity card stays fully vis
 ## Pre-push validation — October 24, 2026
 
 The final source passed all 101 checks. A first rerun exposed a test timing race: production polling could read live input while the lifecycle fixture waited on synthetic idle values, cancelling a pending fallback. The lifecycle fixture now pumps the run loop in short slices and stops automatic polling, leaving idle advancement to its explicit checks; production behavior is unchanged. The corrected rerun passed. Final installed signature and both package checksums were also reverified. Shell entry-point executable permissions were restored, and documentation was reconciled with the final behavior (no right-side notification artwork or interactive Preview menu).
+
+## Release publication — October 24, 2026
+
+The user authorized publishing the 1.0.18 macOS release. Release assets use the previously verified final local universal package (internal build 202610240007), with a newly generated signed Sparkle appcast for that exact ZIP. The release includes the DMG, ZIP, SHA256SUMS.txt and appcast.xml. A source push alone does not update the website download: its resolver follows the latest published stable GitHub release.
