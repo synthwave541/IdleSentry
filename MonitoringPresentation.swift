@@ -3,14 +3,14 @@ import Foundation
 /// One status for both the window and menu bar. Pausing takes precedence over stale timer data.
 enum MonitoringPhase: Equatable {
     case paused, needsApps, waiting, ready
-    case countdown(name: String, remaining: Double)
+    case countdown(name: String, remaining: Double, action: IdleAction = .standardQuit)
 
     static func resolve(isMonitoring: Bool, configuredCount: Int, runningCount: Int,
                         nextApp: AppRunningState?) -> MonitoringPhase {
         guard isMonitoring else { return .paused }
         guard configuredCount > 0 else { return .needsApps }
         guard runningCount > 0 else { return .waiting }
-        if let nextApp { return .countdown(name: nextApp.name, remaining: nextApp.timeRemaining) }
+        if let nextApp { return .countdown(name: nextApp.name, remaining: nextApp.timeRemaining, action: nextApp.action) }
         return .ready
     }
 
@@ -20,8 +20,8 @@ enum MonitoringPhase: Equatable {
         case .needsApps: return "Ready when you are"
         case .waiting: return "Waiting for apps"
         case .ready: return "Watching for inactivity"
-        case .countdown(_, let remaining):
-            return remaining <= 0 ? "Closing…" : SentryFormat.countdown(remaining)
+        case .countdown(_, let remaining, let action):
+            return remaining <= 0 ? (action == .hide ? "Hiding…" : "Closing…") : SentryFormat.countdown(remaining)
         }
     }
 
@@ -31,7 +31,7 @@ enum MonitoringPhase: Equatable {
         case .needsApps: return "Add an app to get started."
         case .waiting: return "Open a monitored app to begin."
         case .ready: return "Keyboard or mouse activity resets the timer."
-        case .countdown(let name, _): return "Next to close · \(name)"
+        case .countdown(let name, _, let action): return "Next to \(action == .hide ? "hide" : "close") · \(name)"
         }
     }
 
@@ -80,12 +80,14 @@ enum SentryFormat {
 }
 
 extension AppState {
+    var isSystemIdle: Bool { isMonitoring && !monitoredApps.isEmpty && systemIdleTime > countdownDelay }
+
     var runningAppCount: Int { runningStates.filter(\.isRunning).count }
 
     /// Keep the detail list available when pointer/keyboard interaction resets the countdown.
     var closingQueue: [AppRunningState] {
         guard isMonitoring else { return [] }
-        return runningStates.filter(\.isRunning).sorted { $0.timeRemaining < $1.timeRemaining }
+        return runningStates.filter(\.isActionPending).sorted { $0.timeRemaining < $1.timeRemaining }
     }
 
     var monitoringPhase: MonitoringPhase {

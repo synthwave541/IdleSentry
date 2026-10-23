@@ -1,0 +1,28 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.07000,0.09000,0.15000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "Artwork.png",
+          "name": "Artwork"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

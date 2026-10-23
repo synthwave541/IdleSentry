@@ -34,8 +34,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    BrandIcon(size: 34)
+                HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("IdleSentry").font(.system(size: 16, weight: .semibold))
                         Text("v\(SentryFormat.version)").font(.caption).foregroundStyle(.secondary)
@@ -61,9 +60,28 @@ struct ContentView: View {
                 }
                 .listStyle(.sidebar)
                 .accessibilityLabel("Navigation")
+                .frame(height: 200)
 
-                SidebarStatus(phase: appState.monitoringPhase, queueApps: appState.closingQueue)
-                    .padding(12)
+                ScrollView {
+                    if appState.showsSetupTips {
+                        SidebarTips(appState: appState,
+                                    reviewRules: { selection = .rules },
+                                    reviewSystem: { selection = .system },
+                                    reviewAccessibility: {
+                                        selection = .system
+                                        appState.showAccessibilityGuidance()
+                                    })
+                            .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 12)
+                    }
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+
+                VStack(spacing: 8) {
+                    if appState.isSystemIdle { SystemIdleCard() }
+                    SidebarStatus(phase: appState.monitoringPhase, queueApps: appState.closingQueue)
+                }
+                .padding(12)
+                .layoutPriority(1)
             }
             .navigationSplitViewColumnWidth(min: 205, ideal: 225, max: 280)
         } detail: {
@@ -99,6 +117,10 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 560)
         .sheet(isPresented: $showingAppPicker) {
             AppPickerView(appState: appState)
+        }
+        .onAppear { appState.checkAccessibility() }
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            if appState.showsSetupTips { appState.checkAccessibility() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .sentryShowAbout)) { _ in selection = .about }
         .onReceive(NotificationCenter.default.publisher(for: .sentryShowRules)) { _ in selection = .rules }
@@ -166,8 +188,8 @@ struct PageLayout<Content: View>: View {
                 content
             }
             .frame(maxWidth: 1040, alignment: .leading)
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 }
@@ -237,9 +259,9 @@ struct SidebarStatus: View {
                 Button { showingQueue.toggle() } label: { card }
                     .buttonStyle(.plain)
                     .accessibilityLabel(phase.isCountingDown
-                        ? "\(phase.subtitle), \(phase.title) remaining, \(queueApps.count) apps in closing queue"
+                        ? "\(phase.subtitle), \(phase.title) remaining, \(queueApps.count) apps in activity queue"
                         : "\(phase.title). View \(queueApps.count) monitored apps")
-                    .accessibilityHint("Shows the full list of apps waiting to close")
+                    .accessibilityHint("Shows the full list of apps waiting to hide or quit")
                     .popover(isPresented: $showingQueue, arrowEdge: .trailing) {
                         PendingAppsPopover(apps: queueApps)
                     }
@@ -248,6 +270,7 @@ struct SidebarStatus: View {
                     .accessibilityLabel("\(phase.title). \(phase.subtitle)")
             }
         }
+        .frame(height: phase.isCountingDown ? 110 : 88)
         .onChange(of: queueApps.isEmpty) { empty in
             if empty { showingQueue = false }
         }
@@ -264,9 +287,9 @@ struct SidebarStatus: View {
                 Text(phase.title)
                     .font(phase.isCountingDown ? .system(size: 24, weight: .medium, design: .monospaced) : .system(size: 12, weight: .semibold))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-                if case .countdown(let name, _) = phase {
+                if case .countdown(let name, _, let action) = phase {
                     HStack {
-                        Text("Next to close").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text(action == .hide ? "Next to hide" : "Next to close").font(.system(size: 10)).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.right").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
                     }
@@ -300,23 +323,25 @@ private struct PendingAppsPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Closing queue").font(.headline)
+                Text("Activity queue").font(.headline)
                 Text("\(apps.count) \(apps.count == 1 ? "monitored app" : "monitored apps") · soonest first")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(16)
             Divider()
             if apps.isEmpty {
-                Text("No apps are waiting to close.").foregroundStyle(.secondary).padding(16)
+                Text("No apps are waiting to hide or quit.").foregroundStyle(.secondary).padding(16)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(apps) { app in
                             HStack(spacing: 10) {
                                 ApplicationIcon(path: app.path, size: 28)
-                                Text(app.name).font(.system(size: 12, weight: .medium))
-                                    .lineLimit(2).help(app.name)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(app.name).font(.system(size: 12, weight: .medium)).lineLimit(2).help(app.name)
+                                    Text(app.action.title).font(.caption).foregroundStyle(.secondary)
+                                }
                                 Spacer(minLength: 12)
-                                Text(app.timeRemaining <= 0 ? "Closing…" : SentryFormat.countdown(app.timeRemaining))
+                                Text(app.timeRemaining <= 0 ? (app.action == .hide ? "Hiding…" : "Closing…") : SentryFormat.countdown(app.timeRemaining))
                                     .font(.system(size: 12, design: .monospaced)).monospacedDigit()
                                     .foregroundStyle(.secondary).fixedSize()
                             }
@@ -350,8 +375,8 @@ struct MonitoringToggleCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(appState.isMonitoring ? "Monitoring enabled" : "Monitoring paused").font(.system(size: 17, weight: .semibold))
                     Text(appState.isMonitoring
-                         ? "Selected apps close when keyboard and mouse inactivity reaches their timeout."
-                         : "Automatic closing is paused. Resume whenever you’re ready.")
+                         ? "Selected apps hide or quit when keyboard and mouse inactivity reaches their timeout."
+                         : "Automatic actions are paused. Resume whenever you’re ready.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
@@ -365,6 +390,8 @@ struct MonitoringToggleCard: View {
 struct ApplicationRow: View {
     let state: AppRunningState
     var timeout: Double? = nil
+    var actionOverride: Binding<IdleAction?>? = nil
+    var defaultAction: IdleAction = .standardQuit
     var remove: (() -> Void)? = nil
     var body: some View {
         HStack(spacing: 12) {
@@ -377,11 +404,19 @@ struct ApplicationRow: View {
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 Circle().fill(state.isRunning ? Color.green : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)
-                Text(state.isRunning ? "Running" : "Not running").font(.caption)
+                Text(state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running").font(.caption)
                     .foregroundStyle(state.isRunning ? Color.primary : Color.secondary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(state.isRunning ? "Running" : "Not running")
+            .accessibilityLabel(state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running")
+            if let actionOverride {
+                Picker("Action for \(state.name)", selection: actionOverride) {
+                    Text("Default (\(defaultAction.title))").tag(nil as IdleAction?)
+                    ForEach(IdleAction.allCases) { action in Text(action.title).tag(Optional(action)) }
+                }
+                .labelsHidden().frame(width: 170)
+                .help("Action after inactivity for \(state.name)")
+            }
             if let remove {
                 Button(role: .destructive, action: remove) { Image(systemName: "minus.circle") }
                     .buttonStyle(.borderless).padding(.leading, 8)
@@ -403,6 +438,14 @@ struct AppRows: View {
             ForEach(Array(appState.runningStates.enumerated()), id: \.element.id) { index, state in
                 ApplicationRow(state: state,
                                timeout: appState.monitoredApps.first { $0.bundleIdentifier == state.bundleIdentifier }?.customTimeout,
+                               actionOverride: allowsRemoval ? Binding(
+                                get: { appState.monitoredApps.first { $0.bundleIdentifier == state.bundleIdentifier }?.customAction },
+                                set: { value in
+                                    if let index = appState.monitoredApps.firstIndex(where: { $0.bundleIdentifier == state.bundleIdentifier }) {
+                                        appState.monitoredApps[index].customAction = value
+                                    }
+                                }) : nil,
+                               defaultAction: appState.defaultAction,
                                remove: allowsRemoval ? { appState.removeApp(bundleId: state.bundleIdentifier) } : nil)
                 if index < appState.runningStates.count - 1 { Divider().padding(.leading, 66) }
             }
@@ -420,7 +463,7 @@ struct EmptyAppsCard: View {
                 Image(systemName: "plus.app").font(.system(size: 32, weight: .light)).foregroundStyle(Color.accentColor)
                     .padding(.bottom, 3).accessibilityHidden(true)
                 Text("Choose what stays private").font(.system(size: 17, weight: .semibold))
-                Text("Add the apps you’d like to close when you step away.\nEverything else stays just as you left it.")
+                Text("Add the apps you’d like to hide or quit when you step away.\nEverything else stays just as you left it.")
                     .foregroundStyle(.secondary).multilineTextAlignment(.center)
                 Button("Add Apps", action: addApps).buttonStyle(.borderedProminent).padding(.top, 4)
             }
@@ -463,8 +506,8 @@ struct DashboardView: View {
                     detail: "\(appState.runningAppCount) running right now", actionTitle: "Manage Apps", action: showApps)
         SummaryCard(symbol: "clock.fill", tint: .teal, title: "Idle timeout", value: SentryFormat.duration(appState.globalTimeout),
                     detail: "Default for selected apps", actionTitle: "Adjust Timer", action: showRules)
-        SummaryCard(symbol: "power", tint: .purple, title: "Quit method", value: appState.quitMethod == 1 ? "Force Quit" : "Standard Quit",
-                    detail: appState.fullyCloseApps ? "Background cleanup enabled" : appState.quitMethod == 1 ? "Terminates immediately" : "Requests a normal quit",
+        SummaryCard(symbol: "power", tint: .purple, title: "Idle action", value: appState.defaultAction.title,
+                    detail: appState.defaultAction == .hide ? "Keeps your work open" : appState.fullyCloseApps ? "Background cleanup enabled" : appState.defaultAction == .forceQuit ? "Terminates immediately" : "Requests a normal quit",
                     actionTitle: "Change Rule", action: showRules)
     }
 }
@@ -511,7 +554,7 @@ struct MonitoredAppsView: View {
     @ObservedObject var appState: AppState
     let addApps: () -> Void
     var body: some View {
-        PageLayout("Monitored Apps", subtitle: "Choose the apps IdleSentry closes after system inactivity.") {
+        PageLayout("Monitored Apps", subtitle: "Choose the apps IdleSentry hides or quits after inactivity.") {
             if appState.monitoredApps.isEmpty {
                 EmptyAppsCard(addApps: addApps)
             } else {
@@ -523,5 +566,90 @@ struct MonitoredAppsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+
+private struct SystemIdleCard: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            ClockPauseShape()
+                .stroke(style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                .frame(width: 22, height: 22).accessibilityHidden(true)
+            Text("System is idle").font(.system(size: 11.5, weight: .medium))
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.primary.opacity(0.04)))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ClockPauseShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addArc(center: CGPoint(x: 12, y: 12), radius: 9,
+                    startAngle: .degrees(0), endAngle: .degrees(-270), clockwise: true)
+        path.move(to: CGPoint(x: 12, y: 7.5))
+        path.addLine(to: CGPoint(x: 12, y: 12))
+        path.addLine(to: CGPoint(x: 15, y: 12))
+        for x in [16.5, 20.5] {
+            path.move(to: CGPoint(x: x, y: 15.5))
+            path.addLine(to: CGPoint(x: x, y: 20.5))
+        }
+        return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
+    }
+}
+
+
+private struct SidebarTips: View {
+    @ObservedObject var appState: AppState
+    let reviewRules: () -> Void
+    let reviewSystem: () -> Void
+    let reviewAccessibility: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Quick setup", systemImage: "lightbulb").font(.system(size: 12, weight: .semibold))
+            if appState.needsAccessibilityRecovery {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Recheck Accessibility access").font(.system(size: 11, weight: .medium))
+                    Text("Access is missing. An update or reinstall can invalidate macOS’s saved approval.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("If the switch is on but access still fails:\n1. Remove IdleSentry with −.\n2. Add IdleSentry from Applications with +.\n3. Enable its access again.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Button("Open permission settings") { appState.openAccessibilitySettings() }
+                        .font(.system(size: 10)).buttonStyle(.bordered).disabled(appState.isPreview)
+                }
+            } else if appState.needsAccessibilityTip {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Enable Accessibility").font(.system(size: 11, weight: .medium))
+                    Text("Needed to recognize supported unsaved-work warnings.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Button("Review Accessibility", action: reviewAccessibility)
+                        .font(.system(size: 10)).buttonStyle(.bordered)
+                }
+            } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Review your settings").font(.system(size: 11, weight: .medium))
+                Text("Default rules may not suit you. Review inactivity rules and System & Startup before leaving apps unattended.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Button("Inactivity Rules", action: reviewRules).buttonStyle(.link).font(.system(size: 10))
+                Button("System & Startup", action: reviewSystem).buttonStyle(.link).font(.system(size: 10))
+            }
+            }
+            HStack {
+                Spacer()
+                Button("Dismiss") { appState.dismissCurrentTip() }
+                    .buttonStyle(.borderless).font(.system(size: 10))
+                    .accessibilityLabel("Dismiss setup tips")
+                Spacer()
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.primary.opacity(0.06)))
     }
 }

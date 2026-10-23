@@ -7,7 +7,7 @@ struct InactivityRulesView: View {
     private let presets: [Double] = [30, 60, 300, 600, 1800]
 
     var body: some View {
-        PageLayout("Inactivity Rules", subtitle: "Set when apps close and how they quit.") {
+        PageLayout("Inactivity Rules", subtitle: "Choose when apps hide or quit after inactivity.") {
             MonitoringToggleCard(appState: appState)
             SentryCard {
                 VStack(alignment: .leading, spacing: 16) {
@@ -17,7 +17,7 @@ struct InactivityRulesView: View {
                         Text(SentryFormat.duration(appState.globalTimeout))
                             .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
                     }
-                    Text("Time without keyboard or mouse activity before a running monitored app is asked to quit.")
+                    Text("Time without keyboard or mouse activity before a running monitored app hides or quits.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 12) {
                         Text("10s").font(.caption).foregroundStyle(.secondary)
@@ -40,24 +40,55 @@ struct InactivityRulesView: View {
             }
             SentryCard {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Quit method").font(.headline)
-                    Picker("Quit method", selection: $appState.quitMethod) {
+                    Text("Action after inactivity").font(.headline)
+                    Picker("Action after inactivity", selection: $appState.quitMethod) {
+                        Text("Hide").tag(2)
                         Text("Standard Quit").tag(0)
                         Text("Force Quit").tag(1)
                     }
-                    .pickerStyle(.segmented).labelsHidden().accessibilityLabel("Quit method")
-                    Label(appState.quitMethod == 1
-                          ? "Force Quit ends the app immediately. Unsaved changes can be lost."
-                          : "Standard Quit requests a normal quit. An app may ask you to save or refuse to close.",
-                          systemImage: appState.quitMethod == 1 ? "exclamationmark.triangle" : "info.circle")
-                        .foregroundStyle(appState.quitMethod == 1 ? SentryPalette.amber : Color.secondary)
+                    .pickerStyle(.segmented).labelsHidden().accessibilityLabel("Action after inactivity")
+                    Label(appState.defaultAction.detail,
+                          systemImage: appState.defaultAction == .hide ? "eye.slash" : appState.defaultAction == .forceQuit ? "exclamationmark.triangle" : "info.circle")
+                        .foregroundStyle(appState.defaultAction == .forceQuit ? SentryPalette.amber : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Text("Choose a different action for individual apps in Monitored Apps.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Divider()
                     SettingToggle(title: "Close remaining background processes",
-                                  detail: "Force-terminate remaining processes with the same app identifier shortly after the quit request. This can interrupt saving.",
+                                  detail: "Clean up matching background processes after the main app has exited. Never runs for Hide.",
                                   isOn: $appState.fullyCloseApps)
+                        .disabled(appState.defaultAction == .hide)
+
                 }
             }
+            SentryCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label("When an app reports unsaved work", systemImage: "doc.badge.ellipsis").font(.headline)
+                    Text("After Standard Quit, choose what happens when an app reports a recognized save warning.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Picker("Unsaved work fallback", selection: $appState.unsavedWorkAction) {
+                        ForEach(UnsavedWorkAction.allCases) { action in Text(action.title).tag(action) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().accessibilityLabel("Unsaved work fallback")
+                    Label(appState.unsavedWorkAction == .forceQuit
+                          ? "Force Quit discards unsaved changes. This fallback applies only after a recognized save warning."
+                          : appState.unsavedWorkAction == .hide
+                          ? "Hide the app and its save warning while keeping unsaved work open. Click its Dock icon to return."
+                          : "Keep the app and its save warning open so you can decide what to save.",
+                          systemImage: appState.unsavedWorkAction == .forceQuit ? "exclamationmark.triangle" : "info.circle")
+                        .foregroundStyle(appState.unsavedWorkAction == .forceQuit ? SentryPalette.amber : Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Requires Accessibility access. Recognizes native keep/discard save panels and English Save / Don’t Save / Cancel warnings with an edited-document signal. Other apps stay open. Input or pausing cancels the fallback; a slow quit alone never triggers it.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if !appState.isAccessibilityGranted {
+                        Button("Request Accessibility Access…") { appState.requestAccessibility() }
+                            .disabled(appState.isPreview)
+                    }
+                }
+            }
+            .disabled(!appState.isUnsavedFallbackEnabled)
+            .opacity(appState.isUnsavedFallbackEnabled ? 1 : 0.45)
+            .help(appState.isUnsavedFallbackEnabled ? "Applies after Standard Quit" : "Select Standard Quit to configure the unsaved-work fallback")
             Label("Save your work before testing automatic closing.", systemImage: "doc.badge.clock")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -83,8 +114,11 @@ struct SettingToggle: View {
 struct SystemSettingsView: View {
     @ObservedObject var appState: AppState
     @State private var loginStatus: SMAppService.Status = .notRegistered
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var accessibilityHighlight = false
 
     var body: some View {
+        ScrollViewReader { scroll in
         PageLayout("System & Startup", subtitle: "Keep IdleSentry close at hand, quietly in your menu bar.") {
             SentryCard {
                 VStack(alignment: .leading, spacing: 16) {
@@ -100,6 +134,22 @@ struct SystemSettingsView: View {
                 }
             }
             SentryCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label("Notifications", systemImage: "bell").font(.headline)
+                    SettingToggle(title: "Send notifications after closing apps",
+                                  detail: "Show a silent notification when monitored apps finish closing. Hidden apps do not send notifications.",
+                                  isOn: $appState.sendCloseNotifications)
+                    if appState.sendCloseNotifications && appState.notificationsDenied {
+                        Text("Notifications are blocked by macOS. Allow IdleSentry in System Settings → Notifications.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open Notification Settings") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                        }
+                        .disabled(appState.isPreview)
+                    }
+                }
+            }
+            SentryCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
                         Label("Accessibility", systemImage: "hand.raised").font(.headline)
@@ -108,7 +158,7 @@ struct SystemSettingsView: View {
                               systemImage: appState.isAccessibilityGranted ? "checkmark.circle.fill" : "circle")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("Check or manage IdleSentry’s Accessibility access here. Monitoring reads system idle time; it does not record what you type.")
+                    Text("Accessibility lets IdleSentry recognize edited documents and supported save warnings for the unsaved-work fallback. The inactivity timer works without it. IdleSentry does not record what you type.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Text("Accessibility status does not pause monitoring. To keep apps open while you’re away, pause monitoring on the Dashboard.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -121,6 +171,9 @@ struct SystemSettingsView: View {
                     .disabled(appState.isPreview)
                 }
             }
+            .id("accessibility-settings")
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.accentColor.opacity(accessibilityHighlight ? 0.9 : 0), lineWidth: 2))
             SentryCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Private by design", systemImage: "lock.shield").font(.headline)
@@ -136,6 +189,25 @@ struct SystemSettingsView: View {
                 }
             }
         }
+        .task(id: appState.accessibilityHighlightRequest) {
+            guard appState.accessibilityHighlightRequest > appState.accessibilityHighlightHandled else { return }
+            appState.accessibilityHighlightHandled = appState.accessibilityHighlightRequest
+            scroll.scrollTo("accessibility-settings", anchor: .center)
+            if reduceMotion {
+                accessibilityHighlight = true
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+                accessibilityHighlight = false
+            } else {
+                for _ in 0..<2 {
+                    guard !Task.isCancelled else { break }
+                    withAnimation(.easeInOut(duration: 0.25)) { accessibilityHighlight = true }
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    withAnimation(.easeInOut(duration: 0.25)) { accessibilityHighlight = false }
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                }
+            }
+        }
+        } // ScrollViewReader
         .onAppear(perform: refreshSystemState)
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in refreshSystemState() }
     }
@@ -143,6 +215,7 @@ struct SystemSettingsView: View {
     private func refreshSystemState() {
         guard !appState.isPreview else { return }
         appState.checkAccessibility()
+        appState.refreshNotificationPermission()
         loginStatus = SMAppService.mainApp.status
     }
 }

@@ -1,20 +1,29 @@
 import AppKit
 import SwiftUI
 import Combine
+import UserNotifications
+import CoreServices
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem?
     var preferencesWindow: NSWindow?
     let appState = AppState()
     private var cancellables = Set<AnyCancellable>()
+    private var launchedAtLogin = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        launchedAtLogin = LaunchContext.isLoginItem(NSAppleEventManager.shared().currentAppleEvent)
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Force the app to run as an accessory (LSUIElement = 1) initially, so no dock icon
         NSApp.setActivationPolicy(.accessory)
-        if let iconImage = NSImage(named: "AppIcon") {
-            NSApp.applicationIconImage = iconImage
-        }
+        // Let IconServices choose the system-selected adaptive bundle icon.
         
+        // Refresh this bundle's icon identity after local upgrades/relocation.
+        if !appState.isPreview { LSRegisterURL(Bundle.main.bundleURL as CFURL, true) }
+        UNUserNotificationCenter.current().delegate = self
+
         // Setup menu bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
@@ -29,23 +38,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         UpdateService.shared.start(preview: appState.isPreview)
         setupMenu()
         
-        // Only show preferences window if NOT launched as a login item
-        // When started at login, the app should stay silently in the menu bar
-        let isLoginLaunch = (appState.launchAtStartup && isLaunchedAtLogin())
-        if !isLoginLaunch {
+        launchedAtLogin = launchedAtLogin || LaunchContext.isLoginItem(NSAppleEventManager.shared().currentAppleEvent)
+        if LaunchContext.opensWindow(isPreview: appState.isPreview, loginItem: launchedAtLogin,
+                                     arguments: ProcessInfo.processInfo.arguments) {
             showPreferences()
         }
     }
-    
-    /// Detect if the app was launched as a login item by checking the launch event
-    private func isLaunchedAtLogin() -> Bool {
-        // If the app was launched by the system (login item), the Apple Event descriptor
-        // won't have the "resume" event that a user double-click launch would have.
-        // A simpler heuristic: if launched within a few seconds of system boot, it's a login item.
-        let uptime = ProcessInfo.processInfo.systemUptime
-        return uptime < 120 // Launched within 2 minutes of boot = likely login item
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler(appState.sendCloseNotifications ? [.banner, .list] : [])
     }
-    
+
     func setupMenu() {
         let menu = NSMenu()
         menu.delegate = self
@@ -144,9 +148,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         
         // Promote to regular application dynamically so we get a Dock icon and standard menu bar
         NSApp.setActivationPolicy(.regular)
-        if let iconImage = NSImage(named: "AppIcon") {
-            NSApp.applicationIconImage = iconImage
-        }
+        // Let IconServices choose the system-selected adaptive bundle icon.
         
         // Construct system menu bar so keyboard shortcuts work
         setupSystemMainMenu()
@@ -154,6 +156,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         // Bring window to the front
         preferencesWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
     }
     
     func setupSystemMainMenu() {
@@ -204,32 +207,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         mainMenu.addItem(windowItem)
         NSApp.windowsMenu = windowMenu
 
-        if appState.isPreview {
-            let previewMenu = NSMenu(title: "Preview")
-            for scenario in ["Ready", "Countdown", "Many Apps", "Paused", "Empty", "Waiting"] {
-                let item = NSMenuItem(title: scenario, action: #selector(previewScenario(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = scenario
-                previewMenu.addItem(item)
-            }
-            previewMenu.addItem(.separator())
-            for appearance in ["System", "Light", "Dark"] {
-                let item = NSMenuItem(title: appearance, action: #selector(previewAppearance(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = appearance
-                previewMenu.addItem(item)
-            }
-            previewMenu.addItem(.separator())
-            for size in ["Compact Window", "Default Window", "Large Window"] {
-                let item = NSMenuItem(title: size, action: #selector(previewWindowSize(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = size
-                previewMenu.addItem(item)
-            }
-            let item = NSMenuItem()
-            item.submenu = previewMenu
-            mainMenu.addItem(item)
-        }
         NSApp.mainMenu = mainMenu
     }
     
@@ -272,24 +249,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     func applicationWillTerminate(_ notification: Notification) {
         appState.stopTimer()
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-    }
-
-    @objc private func previewScenario(_ sender: NSMenuItem) {
-        guard appState.isPreview, let scenario = sender.representedObject as? String else { return }
-        appState.applyPreviewScenario(scenario)
-    }
-
-    @objc private func previewAppearance(_ sender: NSMenuItem) {
-        guard appState.isPreview, let name = sender.representedObject as? String else { return }
-        NSApp.appearance = name == "System" ? nil : NSAppearance(named: name == "Dark" ? .darkAqua : .aqua)
-    }
-
-    @objc private func previewWindowSize(_ sender: NSMenuItem) {
-        guard appState.isPreview, let name = sender.representedObject as? String else { return }
-        let size = name == "Compact Window" ? NSSize(width: 800, height: 560)
-            : name == "Large Window" ? NSSize(width: 1200, height: 860) : NSSize(width: 1040, height: 740)
-        preferencesWindow?.setContentSize(size)
-        preferencesWindow?.center()
     }
 
     func windowWillClose(_ notification: Notification) {

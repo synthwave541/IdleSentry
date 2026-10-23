@@ -11,6 +11,7 @@ struct MonitoredApp: Codable, Identifiable, Equatable {
     var bundleIdentifier: String
     var path: String
     var customTimeout: Double?
+    var customAction: IdleAction?
 }
 
 struct AppRunningState: Identifiable, Equatable {
@@ -21,6 +22,9 @@ struct AppRunningState: Identifiable, Equatable {
     var isRunning: Bool
     var isFrontmost: Bool
     var timeRemaining: Double
+    var isHidden: Bool = false
+    var action: IdleAction = .standardQuit
+    var isActionPending: Bool { isRunning && !(action == .hide && isHidden) }
 }
 
 class AppState: ObservableObject {
@@ -28,12 +32,17 @@ class AppState: ObservableObject {
     let isPreview: Bool
     // All settings stored under the bundle identifier domain so AppCleaner can find them
     // Location: ~/Library/Preferences/com.zennoris.IdleSentry.plist
-    private static let defaults = UserDefaults(suiteName: "com.zennoris.IdleSentry") ?? UserDefaults.standard
+    private let saveWarningReported: (NSRunningApplication) -> Bool
+    private let buildIdentity = BuildIdentity.current
+    private let returningUser: Bool
+    private let previousBuildIdentity: String?
+    private let defaults: UserDefaults
+    private let deliverNotification: (UNNotificationRequest) -> Void
     
     @Published var monitoredApps: [MonitoredApp] = [] {
         didSet {
             saveApps()
-            reEvaluateTimerState()
+            if isPreview { updateStates() } else { reEvaluateTimerState() }
         }
     }
     
@@ -43,15 +52,53 @@ class AppState: ObservableObject {
             if rounded != globalTimeout {
                 globalTimeout = rounded
             }
-            if !isPreview { AppState.defaults.set(globalTimeout, forKey: "globalTimeout") }
+            if !isPreview { defaults.set(globalTimeout, forKey: "globalTimeout") }
         }
     }
     
 
     
+    var defaultAction: IdleAction { IdleAction(rawValue: quitMethod) ?? .standardQuit }
+
+    private var loadingSettings = true
+    @Published var sendCloseNotifications = false {
+        didSet {
+            guard !isPreview else { return }
+            defaults.set(sendCloseNotifications, forKey: "sendCloseNotifications")
+            if sendCloseNotifications && !oldValue && !loadingSettings { requestNotificationPermission() }
+        }
+    }
+    @Published var unsavedWorkAction: UnsavedWorkAction = .leaveOpen {
+        didSet { if !isPreview { defaults.set(unsavedWorkAction.rawValue, forKey: "unsavedWorkAction") } }
+    }
+    var isUnsavedFallbackEnabled: Bool { defaultAction == .standardQuit }
+    @Published var tipsDismissed = false {
+        didSet { if !isPreview { defaults.set(tipsDismissed, forKey: "setupTipsDismissed") } }
+    }
+    @Published var accessibilityTipDismissed = false {
+        didSet { if !isPreview { defaults.set(accessibilityTipDismissed, forKey: "accessibilityTipDismissed") } }
+    }
+    @Published var needsAccessibilityRecovery = false
+    var showsSetupTips: Bool { !tipsDismissed || needsAccessibilityRecovery }
+    var needsAccessibilityTip: Bool { needsAccessibilityRecovery || (!isAccessibilityGranted && !accessibilityTipDismissed) }
+    func dismissCurrentTip() {
+        if needsAccessibilityRecovery {
+            if !isPreview { defaults.set(buildIdentity, forKey: "accessibilityRecoveryDismissedBuild") }
+            needsAccessibilityRecovery = false
+            accessibilityTipDismissed = true
+        } else if needsAccessibilityTip { accessibilityTipDismissed = true } else { tipsDismissed = true }
+    }
+    @Published var accessibilityHighlightRequest = 0
+    var accessibilityHighlightHandled = 0
+
+    func showAccessibilityGuidance() { accessibilityHighlightRequest += 1 }
+
+    @Published var notificationsDenied = false
+
     @Published var quitMethod: Int = 0 {
         didSet {
-            if !isPreview { AppState.defaults.set(quitMethod, forKey: "quitMethod") }
+            if !isPreview { defaults.set(quitMethod, forKey: "quitMethod") }
+            if isPreview { updateStates() }
         }
     }
     
@@ -60,13 +107,13 @@ class AppState: ObservableObject {
     /// Disabled by default to preserve the safer standard-quit behavior.
     @Published var fullyCloseApps: Bool = false {
         didSet {
-            if !isPreview { AppState.defaults.set(fullyCloseApps, forKey: "fullyCloseApps") }
+            if !isPreview { defaults.set(fullyCloseApps, forKey: "fullyCloseApps") }
         }
     }
     
     @Published var isMonitoring: Bool = true {
         didSet {
-            if !isPreview { AppState.defaults.set(isMonitoring, forKey: "isMonitoring") }
+            if !isPreview { defaults.set(isMonitoring, forKey: "isMonitoring") }
             reEvaluateTimerState()
         }
     }
@@ -77,8 +124,19 @@ class AppState: ObservableObject {
     
     /// Grace period before countdown begins after system goes idle (silent delay)
     let countdownDelay: Double = 1.25
-    /// Recently quit apps — bundle IDs with quit timestamps to avoid zombie re-detection
-    private var recentlyQuitApps: [String: Date] = [:]
+    /// At most one action attempt per process during an uninterrupted idle episode.
+    private var attemptedProcesses = Set<pid_t>()
+    private var fallbackHiddenProcesses: [pid_t: Date] = [:]
+    private struct PendingQuit {
+        let app: NSRunningApplication
+        let name: String
+        let requestedAt: Date
+        let notify: Bool
+        let cleanup: [NSRunningApplication]
+        let fallback: UnsavedWorkAction
+        var fallbackApplied = false
+    }
+    private var pendingQuits: [pid_t: PendingQuit] = [:]
     
     /// Whether the system has been idle long enough for countdowns to be active
     @Published var isCountdownActive: Bool = false
@@ -88,7 +146,7 @@ class AppState: ObservableObject {
     var appsPendingClose: [AppRunningState] {
         guard isCountdownActive else { return [] }
         return runningStates
-            .filter { $0.isRunning && $0.timeRemaining < (appStatesDict[$0.bundleIdentifier] ?? globalTimeout) }
+            .filter { $0.isActionPending && $0.timeRemaining < (appStatesDict[$0.bundleIdentifier] ?? globalTimeout) }
             .sorted { $0.timeRemaining < $1.timeRemaining }
     }
     
@@ -113,15 +171,28 @@ class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--ui-preview") ||
-         Bundle.main.object(forInfoDictionaryKey: "ISPreviewMode") as? Bool == true) {
+         Bundle.main.object(forInfoDictionaryKey: "ISPreviewMode") as? Bool == true,
+         preferences: UserDefaults? = nil,
+         saveWarningReported: @escaping (NSRunningApplication) -> Bool = UnsavedWorkInspector.reportsSaveWarning,
+         deliverNotification: @escaping (UNNotificationRequest) -> Void = { request in
+             UNUserNotificationCenter.current().add(request) { error in
+                 if let error { print("IdleSentry: Notification failed: \(error.localizedDescription)") }
+             }
+         }) {
         isPreview = preview
+        self.deliverNotification = deliverNotification
+        self.saveWarningReported = saveWarningReported
+        defaults = preferences ?? UserDefaults(suiteName: "com.zennoris.IdleSentry") ?? .standard
+        returningUser = defaults.object(forKey: "setupTipsDismissed") != nil || defaults.data(forKey: "monitoredApps") != nil
+        previousBuildIdentity = defaults.string(forKey: "accessibilityLastSeenBuild")
         if preview {
             applyPreviewScenario("Ready")
             return
         }
         loadSettings()
-        requestNotificationPermission()
-        isAccessibilityGranted = AXIsProcessTrusted()
+        loadingSettings = false
+        checkAccessibility()
+        defaults.set(buildIdentity, forKey: "accessibilityLastSeenBuild")
         
         // Listen to workspace notifications to start/stop the timer in an event-driven way
         let nc = NSWorkspace.shared.notificationCenter
@@ -138,6 +209,15 @@ class AppState: ObservableObject {
             .sink { [weak self] _ in self?.reEvaluateTimerState() }
             .store(in: &cancellables)
             
+        nc.publisher(for: NSWorkspace.didUnhideApplicationNotification)
+            .sink { [weak self] notification in
+                if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                    self?.fallbackHiddenProcesses.removeValue(forKey: app.processIdentifier)
+                    self?.reEvaluateTimerState()
+                }
+            }
+            .store(in: &cancellables)
+
         // Initial state population
         updateStates()
         reEvaluateTimerState()
@@ -154,7 +234,7 @@ class AppState: ObservableObject {
                 runningApps.contains { $0.bundleIdentifier == app.bundleIdentifier }
             }
             
-            if self.isMonitoring && anyMonitoredAppRunning {
+            if (self.isMonitoring && anyMonitoredAppRunning) || !self.pendingQuits.isEmpty {
                 if self.timer == nil {
                     print("IdleSentry: Monitored app detected running. Starting timer.")
                     self.startTimer()
@@ -165,7 +245,7 @@ class AppState: ObservableObject {
                     self.stopTimer()
                     self.systemIdleTime = 0.0
                     self.isCountdownActive = false
-                    self.recentlyQuitApps.removeAll()
+                    self.attemptedProcesses.removeAll()
                 }
             }
             
@@ -177,9 +257,21 @@ class AppState: ObservableObject {
     /// Explicitly check and publish accessibility permission status
     func checkAccessibility() {
         guard !isPreview else { return }
-        isAccessibilityGranted = AXIsProcessTrusted()
+        let granted = AXIsProcessTrusted()
+        if isAccessibilityGranted != granted { isAccessibilityGranted = granted }
+        if granted {
+            if defaults.string(forKey: "accessibilityLastTrustedBuild") != buildIdentity {
+                defaults.set(buildIdentity, forKey: "accessibilityLastTrustedBuild")
+            }
+            defaults.removeObject(forKey: "accessibilityRecoveryDismissedBuild")
+        }
+        let needsRecovery = AccessRecovery.shouldShow(granted: granted, returningUser: returningUser,
+            previousBuild: previousBuildIdentity, currentBuild: buildIdentity,
+            lastTrustedBuild: defaults.string(forKey: "accessibilityLastTrustedBuild"),
+            dismissedBuild: defaults.string(forKey: "accessibilityRecoveryDismissedBuild"))
+        if needsAccessibilityRecovery != needsRecovery { needsAccessibilityRecovery = needsRecovery }
     }
-    
+
     /// Prompt the user to grant accessibility access and open System Settings
     func requestAccessibility() {
         guard !isPreview else { return }
@@ -195,7 +287,7 @@ class AppState: ObservableObject {
     }
     
     private func loadSettings() {
-        let d = AppState.defaults
+        let d = defaults
         
         if let timeoutVal = d.object(forKey: "globalTimeout") as? Double {
             self.globalTimeout = timeoutVal
@@ -203,8 +295,13 @@ class AppState: ObservableObject {
             self.globalTimeout = 300
         }
         
-        // pauseOnSystemIdle removed
-        self.quitMethod = d.integer(forKey: "quitMethod")
+        self.quitMethod = IdleAction(rawValue: d.integer(forKey: "quitMethod"))?.rawValue ?? 0
+        // Assign the stored value without prompting on launch. Permission is requested only on opt-in.
+        tipsDismissed = d.bool(forKey: "setupTipsDismissed")
+        accessibilityTipDismissed = d.bool(forKey: "accessibilityTipDismissed")
+        unsavedWorkAction = UnsavedWorkAction(rawValue: d.integer(forKey: "unsavedWorkAction")) ?? .leaveOpen
+        let storedNotifications = d.bool(forKey: "sendCloseNotifications")
+        if storedNotifications { sendCloseNotifications = true }
         
         if d.object(forKey: "fullyCloseApps") != nil {
             self.fullyCloseApps = d.bool(forKey: "fullyCloseApps")
@@ -231,7 +328,7 @@ class AppState: ObservableObject {
     private func saveApps() {
         guard !isPreview else { return }
         if let encoded = try? JSONEncoder().encode(monitoredApps) {
-            AppState.defaults.set(encoded, forKey: "monitoredApps")
+            defaults.set(encoded, forKey: "monitoredApps")
         }
     }
     
@@ -271,19 +368,24 @@ class AppState: ObservableObject {
     
     private func tick() {
         // Poll accessibility
-        isAccessibilityGranted = AXIsProcessTrusted()
+        checkAccessibility()
         
-        // Get system idle time (time since last mouse/keyboard event)
-        systemIdleTime = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        
-        // The countdown is active once the system has been idle past the grace period
+        checkIdleTime(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!))
+    }
+
+    /// Shared by the timer and isolated lifecycle integration checks.
+    func checkIdleTime(_ seconds: Double) {
+        guard !isPreview else { return }
+        systemIdleTime = seconds.isFinite ? max(0, seconds) : 0
         let effectiveIdle = max(0, systemIdleTime - countdownDelay)
-        isCountdownActive = effectiveIdle > 0
-        
-        // Clean up stale entries from recentlyQuitApps (older than 5 seconds)
-        let now = Date()
-        recentlyQuitApps = recentlyQuitApps.filter { now.timeIntervalSince($0.value) < 5.0 }
-        
+        isCountdownActive = isMonitoring && effectiveIdle > 0
+        collectCompletedQuits(allowFallback: isMonitoring && effectiveIdle > 0)
+        if effectiveIdle == 0 {
+            attemptedProcesses.removeAll()
+            // Input returns control to the user. An unanswered save prompt is no longer
+            // an automatic close; the next idle episode may request a new action.
+            pendingQuits.removeAll()
+        }
         updateStates(effectiveIdle: effectiveIdle)
         
         // If all monitored apps have quit, stop the timer
@@ -313,13 +415,18 @@ class AppState: ObservableObject {
     private func updateStates(effectiveIdle: Double = 0) {
         if isPreview {
             runningStates = monitoredApps.map { app in
-                runningStates.first { $0.bundleIdentifier == app.bundleIdentifier } ??
-                AppRunningState(name: app.name, bundleIdentifier: app.bundleIdentifier, path: app.path,
-                                isRunning: false, isFrontmost: false, timeRemaining: globalTimeout)
+                var state = runningStates.first { $0.bundleIdentifier == app.bundleIdentifier } ??
+                    AppRunningState(name: app.name, bundleIdentifier: app.bundleIdentifier, path: app.path,
+                                    isRunning: false, isFrontmost: false, timeRemaining: globalTimeout)
+                state.action = app.customAction ?? defaultAction
+                return state
             }
             return
         }
         let runningApps = NSWorkspace.shared.runningApplications
+        fallbackHiddenProcesses = fallbackHiddenProcesses.filter { pid, requested in
+            runningApps.contains { $0.processIdentifier == pid && ($0.isHidden || Date().timeIntervalSince(requested) < 2) }
+        }
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         
         var newStates: [AppRunningState] = []
@@ -328,20 +435,8 @@ class AppState: ObservableObject {
             let bundleId = app.bundleIdentifier
             let runningApp = runningApps.first { $0.bundleIdentifier == bundleId }
             let limit = app.customTimeout ?? globalTimeout
-            
-            // Skip recently-quit apps to avoid zombie re-detection
-            if recentlyQuitApps[bundleId] != nil {
-                appStatesDict[bundleId] = limit
-                newStates.append(AppRunningState(
-                    name: app.name,
-                    bundleIdentifier: bundleId,
-                    path: app.path,
-                    isRunning: false,
-                    isFrontmost: false,
-                    timeRemaining: limit
-                ))
-                continue
-            }
+            let effectiveAction: IdleAction = runningApp.map { fallbackHiddenProcesses[$0.processIdentifier] != nil } == true
+                ? .hide : (app.customAction ?? defaultAction)
             
             let isRunning = runningApp != nil
             
@@ -357,13 +452,14 @@ class AppState: ObservableObject {
             // When user is active (effectiveIdle == 0), timeRemaining == limit (full timer)
             // When system is idle, timeRemaining counts down from limit
             let timeRemaining: Double
-            if isRunning && isMonitoring {
+            if isRunning && isMonitoring && !(effectiveAction == .hide && runningApp?.isHidden == true) {
                 timeRemaining = max(0, limit - effectiveIdle)
                 
                 if timeRemaining <= 0 {
                     if let rApp = runningApp {
-                        quitApp(rApp, name: app.name)
-                        recentlyQuitApps[bundleId] = Date()
+                        if attemptedProcesses.insert(rApp.processIdentifier).inserted {
+                            performAction(effectiveAction, on: rApp, name: app.name)
+                        }
                     }
                 }
             } else {
@@ -378,76 +474,83 @@ class AppState: ObservableObject {
                 path: app.path,
                 isRunning: isRunning,
                 isFrontmost: isFrontmost,
-                timeRemaining: timeRemaining
+                timeRemaining: timeRemaining,
+                isHidden: runningApp?.isHidden ?? false,
+                action: effectiveAction
             ))
         }
         
         self.runningStates = newStates
     }
     
-    private func quitApp(_ app: NSRunningApplication, name: String) {
-        print("IdleSentry: Quitting idle app \(name) (\(app.bundleIdentifier ?? ""))")
-        
-        let success: Bool
-        if quitMethod == 1 {
-            success = app.forceTerminate()
-        } else {
-            success = app.terminate()
+    private func performAction(_ action: IdleAction, on app: NSRunningApplication, name: String) {
+        if action == .hide {
+            if !app.hide() { print("IdleSentry: Could not hide \(name)") }
+            return
         }
-        
-        // Some apps leave behind helper or background processes that keep their menu-bar
-        // icon alive even after the main process terminates. When "Fully close the app" is
-        // enabled, kill every running process whose bundle identifier matches, ensuring
-        // the app is completely closed.
-        if fullyCloseApps, let bundleId = app.bundleIdentifier {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-                self?.terminateRemainingProcesses(forBundleId: bundleId, name: name)
-            }
-        }
-        
-        if success {
-            sendNotification(
-                title: "App Closed Automatically",
-                body: "\(name) was quit because it exceeded the idle timeout."
-            )
-        } else {
-            print("Failed to terminate \(name)")
+        guard pendingQuits[app.processIdentifier] == nil else { return }
+        let cleanup = fullyCloseApps ? NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier == app.bundleIdentifier && $0.processIdentifier != app.processIdentifier && $0.activationPolicy != .regular
+        } : []
+        let accepted = action == .forceQuit ? app.forceTerminate() : app.terminate()
+        // A refused normal quit may be exactly the save-decision case we must inspect.
+        if accepted || action == .standardQuit {
+            pendingQuits[app.processIdentifier] = PendingQuit(app: app, name: name, requestedAt: Date(),
+                                                           notify: sendCloseNotifications, cleanup: cleanup,
+                                                           fallback: action == .standardQuit && isUnsavedFallbackEnabled ? unsavedWorkAction : .leaveOpen)
         }
     }
-    
-    /// Terminates any remaining processes matching the given bundle identifier.
-    /// This catches helper/menu-bar processes that survive a standard quit.
-    private func terminateRemainingProcesses(forBundleId bundleId: String, name: String) {
-        let remaining = NSWorkspace.shared.runningApplications.filter {
-            $0.bundleIdentifier == bundleId && !$0.isTerminated
-        }
-        
-        guard !remaining.isEmpty else { return }
-        
-        print("IdleSentry: Fully closing \(remaining.count) lingering process(es) for \(name).")
-        for process in remaining {
-            // Force terminate lingering helpers — they've already had a chance to save
-            // during the initial standard/force quit of the main process.
-            if !process.forceTerminate() {
-                print("IdleSentry: Failed to fully terminate lingering process \(process.bundleIdentifier ?? "?")")
+
+    private func collectCompletedQuits(allowFallback: Bool) {
+        var closed: [String] = []
+        for (pid, pending) in pendingQuits {
+            if pending.app.isTerminated {
+                // Never kill a process displaying a save prompt, or a newly relaunched instance.
+                for helper in pending.cleanup where !helper.isTerminated { helper.forceTerminate() }
+                if pending.notify { closed.append(pending.name) }
+                pendingQuits.removeValue(forKey: pid)
+            } else if allowFallback && !pending.fallbackApplied && pending.fallback != .leaveOpen &&
+                        Date().timeIntervalSince(pending.requestedAt) >= 1 &&
+                        Date().timeIntervalSince(pending.requestedAt) <= 30 && saveWarningReported(pending.app) {
+                // Only a positively reported save decision can trigger the explicit fallback.
+                pendingQuits[pid]?.fallbackApplied = true
+                if pending.fallback == .hide {
+                    fallbackHiddenProcesses[pid] = Date()
+                    pending.app.hide()
+                    pendingQuits.removeValue(forKey: pid) // Hiding is not a completed close.
+                } else {
+                    pending.app.forceTerminate() // Opt-in policy explicitly permits losing unsaved work.
+                }
+            } else if Date().timeIntervalSince(pending.requestedAt) > 30 {
+                // A declined quit/save prompt is not a successful close.
+                pendingQuits.removeValue(forKey: pid)
             }
         }
+        if sendCloseNotifications && !closed.isEmpty { sendNotification(names: closed) }
     }
-    
+
+    func refreshNotificationPermission() {
+        guard !isPreview else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async { self?.notificationsDenied = settings.authorizationStatus == .denied }
+        }
+    }
+
     private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { [weak self] _, _ in
+            self?.refreshNotificationPermission()
+        }
     }
-    
-    private func sendNotification(title: String, body: String) {
+
+    private func sendNotification(names: [String]) {
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-        
+        content.title = names.count == 1 ? "App closed automatically" : "Apps closed automatically"
+        content.body = CloseNotification.body(names: names)
+        content.sound = nil
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        deliverNotification(request)
     }
-    
+
     private func toggleLaunchAtStartup(_ enable: Bool) {
         let service = SMAppService.mainApp
         if enable {
@@ -475,6 +578,7 @@ class AppState: ObservableObject {
         globalTimeout = 300
         isMonitoring = scenario != "Paused"
         isCountdownActive = scenario == "Countdown" || scenario == "Many Apps"
+        systemIdleTime = isCountdownActive ? 251.25 : 0
         var samples = [
             ("Safari", "com.apple.Safari", "/Applications/Safari.app"),
             ("Notes", "com.apple.Notes", "/System/Applications/Notes.app"),
@@ -495,7 +599,8 @@ class AppState: ObservableObject {
         runningStates = monitoredApps.enumerated().map { index, app in
             AppRunningState(name: app.name, bundleIdentifier: app.bundleIdentifier, path: app.path,
                             isRunning: scenario != "Waiting" && (many || index < 2), isFrontmost: index == 0,
-                            timeRemaining: many ? 50 + Double(index) * 15 : scenario == "Countdown" ? 50 : globalTimeout)
+                            timeRemaining: many ? 50 + Double(index) * 15 : scenario == "Countdown" ? 50 : globalTimeout,
+                            action: app.customAction ?? defaultAction)
         }
     }
 }
