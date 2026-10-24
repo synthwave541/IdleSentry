@@ -23,8 +23,9 @@ struct AppRunningState: Identifiable, Equatable {
     var isFrontmost: Bool
     var timeRemaining: Double
     var isHidden: Bool = false
+    var isPlaybackProtected: Bool = false
     var action: IdleAction = .standardQuit
-    var isActionPending: Bool { isRunning && !(action == .hide && isHidden) }
+    var isActionPending: Bool { isRunning && !isPlaybackProtected && !(action == .hide && isHidden) }
 }
 
 class AppState: ObservableObject {
@@ -38,6 +39,8 @@ class AppState: ObservableObject {
     private let previousBuildIdentity: String?
     private let defaults: UserDefaults
     private let deliverNotification: (UNNotificationRequest) -> Void
+    private let playbackProtection: () -> Set<pid_t>
+    private var protectedPlaybackProcesses = Set<pid_t>()
     
     @Published var monitoredApps: [MonitoredApp] = [] {
         didSet {
@@ -67,6 +70,9 @@ class AppState: ObservableObject {
             defaults.set(sendCloseNotifications, forKey: "sendCloseNotifications")
             if sendCloseNotifications && !oldValue && !loadingSettings { requestNotificationPermission() }
         }
+    }
+    @Published var protectFullscreenPlayback = true {
+        didSet { if !isPreview { defaults.set(protectFullscreenPlayback, forKey: "protectFullscreenPlayback") } }
     }
     @Published var unsavedWorkAction: UnsavedWorkAction = .leaveOpen {
         didSet { if !isPreview { defaults.set(unsavedWorkAction.rawValue, forKey: "unsavedWorkAction") } }
@@ -126,6 +132,8 @@ class AppState: ObservableObject {
     let countdownDelay: Double = 1.25
     /// At most one action attempt per process during an uninterrupted idle episode.
     private var attemptedProcesses = Set<pid_t>()
+    private var appInteractions = AppInteractionGrace()
+    private let monotonicNow: () -> TimeInterval
     private var fallbackHiddenProcesses: [pid_t: Date] = [:]
     private struct PendingQuit {
         let app: NSRunningApplication
@@ -173,6 +181,8 @@ class AppState: ObservableObject {
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--ui-preview") ||
          Bundle.main.object(forInfoDictionaryKey: "ISPreviewMode") as? Bool == true,
          preferences: UserDefaults? = nil,
+         monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         playbackProtection: @escaping () -> Set<pid_t> = PlaybackProtection.protectedProcesses,
          saveWarningReported: @escaping (NSRunningApplication) -> Bool = UnsavedWorkInspector.reportsSaveWarning,
          deliverNotification: @escaping (UNNotificationRequest) -> Void = { request in
              UNUserNotificationCenter.current().add(request) { error in
@@ -180,6 +190,8 @@ class AppState: ObservableObject {
              }
          }) {
         isPreview = preview
+        self.monotonicNow = monotonicNow
+        self.playbackProtection = playbackProtection
         self.deliverNotification = deliverNotification
         self.saveWarningReported = saveWarningReported
         defaults = preferences ?? UserDefaults(suiteName: "com.zennoris.IdleSentry") ?? .standard
@@ -198,15 +210,20 @@ class AppState: ObservableObject {
         let nc = NSWorkspace.shared.notificationCenter
         
         nc.publisher(for: NSWorkspace.didLaunchApplicationNotification)
-            .sink { [weak self] _ in self?.reEvaluateTimerState() }
+            .sink { [weak self] notification in self?.handleAppInteraction(notification) }
             .store(in: &cancellables)
             
         nc.publisher(for: NSWorkspace.didTerminateApplicationNotification)
-            .sink { [weak self] _ in self?.reEvaluateTimerState() }
+            .sink { [weak self] notification in
+                if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                    self?.appInteractions.remove(app.processIdentifier)
+                }
+                self?.reEvaluateTimerState()
+            }
             .store(in: &cancellables)
             
         nc.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .sink { [weak self] _ in self?.reEvaluateTimerState() }
+            .sink { [weak self] notification in self?.handleAppInteraction(notification) }
             .store(in: &cancellables)
             
         nc.publisher(for: NSWorkspace.didUnhideApplicationNotification)
@@ -223,6 +240,25 @@ class AppState: ObservableObject {
         reEvaluateTimerState()
     }
     
+    private func handleAppInteraction(_ notification: Notification) {
+        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+            recordAppInteraction(app)
+        }
+        reEvaluateTimerState()
+    }
+
+    /// Launchers/remappers can open or activate an app without resetting CGEvent's
+    /// idle counter. Give only that monitored process a fresh inactivity interval.
+    func recordAppInteraction(_ app: NSRunningApplication) {
+        guard !isPreview, !app.isTerminated,
+              monitoredApps.contains(where: { $0.bundleIdentifier == app.bundleIdentifier }),
+              pendingQuits[app.processIdentifier] == nil else { return }
+        // A normal quit may itself activate the app to show a save decision.
+        // Do not cancel that decision or re-arm an already pending action.
+        appInteractions.record(app.processIdentifier, at: monotonicNow())
+        attemptedProcesses.remove(app.processIdentifier)
+    }
+
     /// Evaluates if any of the monitored applications are currently running, and starts/stops the timer accordingly.
     func reEvaluateTimerState() {
         guard !isPreview else { return }
@@ -300,6 +336,7 @@ class AppState: ObservableObject {
         tipsDismissed = d.bool(forKey: "setupTipsDismissed")
         accessibilityTipDismissed = d.bool(forKey: "accessibilityTipDismissed")
         unsavedWorkAction = UnsavedWorkAction(rawValue: d.integer(forKey: "unsavedWorkAction")) ?? .leaveOpen
+        protectFullscreenPlayback = d.object(forKey: "protectFullscreenPlayback") as? Bool ?? true
         let storedNotifications = d.bool(forKey: "sendCloseNotifications")
         if storedNotifications { sendCloseNotifications = true }
         
@@ -379,6 +416,14 @@ class AppState: ObservableObject {
         systemIdleTime = seconds.isFinite ? max(0, seconds) : 0
         let effectiveIdle = max(0, systemIdleTime - countdownDelay)
         isCountdownActive = isMonitoring && effectiveIdle > 0
+        protectedPlaybackProcesses = isMonitoring && protectFullscreenPlayback ? playbackProtection() : []
+        for pid in protectedPlaybackProcesses {
+            // Playback can begin after an earlier close request. Never apply its
+            // unsaved-work fallback or helper cleanup while protection is active.
+            pendingQuits.removeValue(forKey: pid)
+            attemptedProcesses.remove(pid)
+            appInteractions.record(pid, at: monotonicNow())
+        }
         collectCompletedQuits(allowFallback: isMonitoring && effectiveIdle > 0)
         if effectiveIdle == 0 {
             attemptedProcesses.removeAll()
@@ -424,6 +469,8 @@ class AppState: ObservableObject {
             return
         }
         let runningApps = NSWorkspace.shared.runningApplications
+        appInteractions.retain(Set(runningApps.map(\.processIdentifier)))
+        let now = monotonicNow()
         fallbackHiddenProcesses = fallbackHiddenProcesses.filter { pid, requested in
             runningApps.contains { $0.processIdentifier == pid && ($0.isHidden || Date().timeIntervalSince(requested) < 2) }
         }
@@ -439,6 +486,9 @@ class AppState: ObservableObject {
                 ? .hide : (app.customAction ?? defaultAction)
             
             let isRunning = runningApp != nil
+            let playbackProtected = protectFullscreenPlayback && runningApp.map {
+                protectedPlaybackProcesses.contains($0.processIdentifier)
+            } == true
             
             // isFrontmost is purely a UI label (visible windows check)
             let isFrontmost: Bool
@@ -448,12 +498,16 @@ class AppState: ObservableObject {
                 isFrontmost = false
             }
             
-            // Countdown logic: based purely on system idle time
-            // When user is active (effectiveIdle == 0), timeRemaining == limit (full timer)
-            // When system is idle, timeRemaining counts down from limit
+            // Use the newer of system input and this process's launch/activation.
+            // No app inherits inactivity accumulated before it was opened.
             let timeRemaining: Double
-            if isRunning && isMonitoring && !(effectiveAction == .hide && runningApp?.isHidden == true) {
-                timeRemaining = max(0, limit - effectiveIdle)
+            if isRunning && isMonitoring && !playbackProtected && runningApp?.isFinishedLaunching == true &&
+               !(effectiveAction == .hide && runningApp?.isHidden == true) {
+                let appIdle = runningApp.map {
+                    appInteractions.effectiveIdle(for: $0.processIdentifier, systemIdle: effectiveIdle,
+                                                  now: now, grace: countdownDelay)
+                } ?? effectiveIdle
+                timeRemaining = max(0, limit - appIdle)
                 
                 if timeRemaining <= 0 {
                     if let rApp = runningApp {
@@ -476,6 +530,7 @@ class AppState: ObservableObject {
                 isFrontmost: isFrontmost,
                 timeRemaining: timeRemaining,
                 isHidden: runningApp?.isHidden ?? false,
+                isPlaybackProtected: playbackProtected,
                 action: effectiveAction
             ))
         }

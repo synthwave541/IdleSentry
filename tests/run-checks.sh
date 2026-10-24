@@ -11,7 +11,7 @@ bash scripts/fetch-sparkle.sh
 SPARKLE_DIR="$PWD/build/dependencies/Sparkle-2.10.0"
 swiftc -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker "$SPARKLE_DIR" -sdk "$(xcrun --show-sdk-path)" -target "$(uname -m)-apple-macos13.0" \
     -o "$CHECK_DIR/PresentationChecks" tests/PresentationChecks.swift \
-    AccessRecovery.swift LaunchContext.swift UnsavedWork.swift IdleAction.swift UpdateService.swift AppState.swift MonitoringPresentation.swift ContentView.swift SettingsViews.swift AppPickerView.swift
+    PlaybackProtection.swift AccessRecovery.swift LaunchContext.swift UnsavedWork.swift IdleAction.swift UpdateService.swift AppState.swift MonitoringPresentation.swift ContentView.swift SettingsViews.swift AppPickerView.swift
 # Disposable native apps exercise actual hide/quit semantics without touching user apps.
 swiftc -O -o "$CHECK_DIR/Helper" tests/LifecycleHelper.swift
 for helper_name in Unsaved First Second; do

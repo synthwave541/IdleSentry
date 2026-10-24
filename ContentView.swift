@@ -7,6 +7,7 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var selection: Destination? = .dashboard
     @State private var showingAppPicker = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Destination: String, CaseIterable, Identifiable {
         case dashboard, apps, rules, system, about
@@ -76,10 +77,21 @@ struct ContentView: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
 
-                VStack(spacing: 8) {
-                    if appState.isSystemIdle { SystemIdleCard() }
+                VStack(spacing: 0) {
+                    // Reveal inside its own viewport so the idle card rises from
+                    // behind the status card without painting over its contents.
+                    VStack(spacing: 0) {
+                        if appState.isSystemIdle {
+                            SystemIdleCard()
+                                .padding(.bottom, 8)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .clipped()
                     SidebarStatus(phase: appState.monitoringPhase, queueApps: appState.closingQueue)
                 }
+                .animation(reduceMotion ? nil : .spring(response: 0.48, dampingFraction: 0.9),
+                           value: appState.isSystemIdle)
                 .padding(12)
                 .layoutPriority(1)
             }
@@ -404,11 +416,11 @@ struct ApplicationRow: View {
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 Circle().fill(state.isRunning ? Color.green : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)
-                Text(state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running").font(.caption)
+                Text(state.isPlaybackProtected ? "Playback protected" : state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running").font(.caption)
                     .foregroundStyle(state.isRunning ? Color.primary : Color.secondary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running")
+            .accessibilityLabel(state.isPlaybackProtected ? "Playback protected" : state.isHidden ? "Hidden" : state.isRunning ? "Running" : "Not running")
             if let actionOverride {
                 Picker("Action for \(state.name)", selection: actionOverride) {
                     Text("Default (\(defaultAction.title))").tag(nil as IdleAction?)

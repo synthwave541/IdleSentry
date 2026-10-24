@@ -62,6 +62,16 @@ struct InactivityRulesView: View {
                 }
             }
             SentryCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Playback protection", systemImage: "play.rectangle").font(.headline)
+                    SettingToggle(title: "Protect fullscreen playback",
+                                  detail: "Keep a fullscreen app open while it asks macOS to keep the display awake. Applies to Hide, Standard Quit and Force Quit.",
+                                  isOn: $appState.protectFullscreenPlayback)
+                    Text("Enabled by default. Supports apps that report display-awake activity, including supported browser video and media players. A player may keep that request active while paused. When protection ends, the app gets a fresh inactivity timeout. Windowed playback and Picture in Picture are not covered.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            SentryCard {
                 VStack(alignment: .leading, spacing: 16) {
                     Label("When an app reports unsaved work", systemImage: "doc.badge.ellipsis").font(.headline)
                     Text("After Standard Quit, choose what happens when an app reports a recognized save warning.")

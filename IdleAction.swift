@@ -30,3 +30,20 @@ enum CloseNotification {
         return shown + (extra > 0 ? " and \(extra) more" : "") + " closed after inactivity."
     }
 }
+
+/// Per-process interaction floors use a monotonic clock, so wall-clock changes
+/// cannot expire launch protection or indefinitely postpone an inactivity action.
+struct AppInteractionGrace {
+    private var interactions: [Int32: TimeInterval] = [:]
+
+    mutating func record(_ process: Int32, at now: TimeInterval) { interactions[process] = now }
+    mutating func remove(_ process: Int32) { interactions.removeValue(forKey: process) }
+    mutating func retain(_ processes: Set<Int32>) {
+        interactions = interactions.filter { processes.contains($0.key) }
+    }
+    func effectiveIdle(for process: Int32, systemIdle: TimeInterval,
+                       now: TimeInterval, grace: TimeInterval) -> TimeInterval {
+        guard let interaction = interactions[process] else { return systemIdle }
+        return min(systemIdle, max(0, now - interaction - grace))
+    }
+}

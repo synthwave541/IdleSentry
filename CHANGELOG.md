@@ -1,5 +1,12 @@
 # Release history
 
+## 1.0.19 — 2026-10-24
+
+- Reveal the System is idle card with a clipped upward slide and fade above the pinned sidebar status, using a soft spring and disabling motion for Reduce Motion.
+- Add default-on Protect fullscreen playback in Inactivity Rules. Require a visible fullscreen window and a display-awake assertion from that app or a descendant helper; skip Hide, Standard Quit and Force Quit, label protected app rows, and restart the timeout when protection ends.
+- Give newly launched or reactivated monitored apps their own fresh inactivity interval, including when keyboard remappers and launchers leave the system input-idle counter unchanged. Other apps keep their existing deadlines.
+- Wait for app startup to finish before attempting an idle action. Ignore activation caused by a pending quit/save decision, and clear interaction records when processes exit.
+
 ## 1.0.18 — 2026-10-24
 
 - Add Hide alongside Standard Quit and Force Quit, with per-app action overrides and compatible legacy settings. Hidden apps keep their work open and leave the Hide countdown.

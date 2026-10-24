@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import UserNotifications
 import Carbon
+import IOKit.pwr_mgt
 
 @main
 struct PresentationChecks {
@@ -36,6 +37,7 @@ struct PresentationChecks {
         defer { for helper in helpers where !helper.isTerminated { helper.forceTerminate() } }
         func launch(_ name: String, refuse: Bool = false) throws -> (NSRunningApplication, URL) {
             let metrics = URL(fileURLWithPath: directory).appendingPathComponent("\(name).json")
+            try? FileManager.default.removeItem(at: metrics)
             let config = NSWorkspace.OpenConfiguration()
             config.arguments = ["--metrics=\(metrics.path)"] + (refuse ? ["--refuse-quit"] : [])
             config.activates = false
@@ -72,6 +74,10 @@ struct PresentationChecks {
         state.checkIdleTime(20)
         check(!unsaved.isTerminated && delivered.isEmpty, "Declined quit is never reported closed or killed by cleanup")
         check((try metrics(url)["quitRequests"] as? Int) == 1, "Only one quit request per idle episode")
+        state.recordAppInteraction(unsaved)
+        state.checkIdleTime(20)
+        check(state.runningStates.first?.timeRemaining == 0,
+              "Activation from a pending save decision does not reset or re-arm a quit")
         reportsWarning = true
         state.unsavedWorkAction = .forceQuit
         state.quitMethod = 1
@@ -128,6 +134,72 @@ struct PresentationChecks {
         state.monitoredApps = [MonitoredApp(name: "Unsaved", bundleIdentifier: unsaved.bundleIdentifier!, path: unsaved.bundleURL!.path, customAction: .standardQuit)]
         state.checkIdleTime(0); state.checkIdleTime(20); pump(1.1); state.stopTimer(); state.checkIdleTime(20); pump(0.4); state.checkIdleTime(20)
         check(unsaved.isTerminated && delivered.count == 1, "Explicit unsaved-work Force Quit works while notification opt-out stays silent")
+        var testUptime: TimeInterval = 100
+        var simulatedPlayback = Set<pid_t>()
+        let launchSuite = "com.zennoris.IdleSentry.tests.launch.\(UUID().uuidString)"
+        let launchDefaults = UserDefaults(suiteName: launchSuite)!
+        defer { launchDefaults.removePersistentDomain(forName: launchSuite) }
+        let launchState = AppState(preview: false, preferences: launchDefaults,
+                                   monotonicNow: { testUptime }, playbackProtection: { simulatedPlayback },
+                                   saveWarningReported: { _ in true }, deliverNotification: { _ in fatalError("Unexpected notification") })
+        defer { launchState.isMonitoring = false; launchState.stopTimer() }
+        launchState.globalTimeout = 10
+        launchState.monitoredApps = [MonitoredApp(name: "First", bundleIdentifier: first.bundleIdentifier!, path: first.bundleURL!.path)]
+        let (reopened, _) = try launch("First")
+        pump(); launchState.stopTimer()
+        launchState.checkIdleTime(3600)
+        check(!reopened.isTerminated && launchState.runningStates.first?.timeRemaining == 10,
+              "Real app launch with an hour-old input counter receives a fresh timeout")
+        testUptime = 106.25
+        launchState.checkIdleTime(3600)
+        check(launchState.runningStates.first?.timeRemaining == 5,
+              "Launch protection counts down instead of exempting the app forever")
+        launchState.recordAppInteraction(reopened)
+        launchState.checkIdleTime(3600)
+        check(launchState.runningStates.first?.timeRemaining == 10,
+              "Foreground activation resets only the returning app")
+        check(launchState.protectFullscreenPlayback, "Playback protection defaults on for existing preference suites")
+        simulatedPlayback = [reopened.processIdentifier]
+        testUptime = 1000
+        for method in [0, 1, 2] {
+            launchState.quitMethod = method
+            launchState.checkIdleTime(3600)
+            check(!reopened.isTerminated && !reopened.isHidden && launchState.runningStates.first?.isPlaybackProtected == true,
+                  "Fullscreen playback blocks the selected idle action")
+        }
+        check(launchState.closingQueue.isEmpty && launchState.runningAppCount == 1,
+              "Protected playback leaves the closing queue while the app remains running")
+        simulatedPlayback = []
+        launchState.checkIdleTime(3600)
+        check(launchState.runningStates.first?.timeRemaining == 10,
+              "Ending playback protection gives a fresh timeout rather than immediate closing")
+        launchState.protectFullscreenPlayback = false
+        check(launchDefaults.object(forKey: "protectFullscreenPlayback") as? Bool == false,
+              "Playback protection opt-out persists")
+        simulatedPlayback = [reopened.processIdentifier]
+        launchState.quitMethod = 0
+        testUptime = 1012
+        launchState.checkIdleTime(3600)
+        pump(0.6); launchState.stopTimer(); launchState.checkIdleTime(3600)
+        check(reopened.isTerminated, "Automatic closing resumes after the fresh inactivity interval")
+        launchState.protectFullscreenPlayback = true
+        simulatedPlayback = []
+        launchState.monitoredApps = [MonitoredApp(name: "Unsaved", bundleIdentifier: unsaved.bundleIdentifier!, path: unsaved.bundleURL!.path)]
+        let (saveTarget, _) = try launch("Unsaved", refuse: true)
+        pump(); launchState.stopTimer()
+        launchState.unsavedWorkAction = .forceQuit
+        testUptime = 1024
+        launchState.checkIdleTime(3600)
+        simulatedPlayback = [saveTarget.processIdentifier]
+        pump(1.1); launchState.stopTimer(); launchState.checkIdleTime(3600)
+        check(!saveTarget.isTerminated && launchState.runningStates.first?.isPlaybackProtected == true,
+              "Playback beginning during a save decision cancels its destructive fallback")
+        launchState.protectFullscreenPlayback = false
+        launchState.isMonitoring = false; launchState.stopTimer()
+        let playbackRestored = AppState(preview: false, preferences: launchDefaults)
+        check(!playbackRestored.protectFullscreenPlayback, "Playback opt-out survives relaunch")
+        playbackRestored.isMonitoring = false; playbackRestored.stopTimer()
+
         state.isMonitoring = false
         state.stopTimer()
         state.tipsDismissed = true
@@ -144,6 +216,63 @@ struct PresentationChecks {
             precondition(condition(), message)
             count += 1
         }
+        do {
+            var assertion: IOPMAssertionID = 0
+            let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn), "IdleSentry disposable playback check" as CFString, &assertion)
+            check(result == kIOReturnSuccess, "Disposable display assertion can be created")
+            defer { IOPMAssertionRelease(assertion) }
+            check(PlaybackProtection.displayAssertionOwners().contains(ProcessInfo.processInfo.processIdentifier),
+                  "Live IOKit assertion dictionaries resolve the owning process")
+        }
+        let display = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        check(PlaybackEvidence.coversDisplay(window: display, display: display), "Fullscreen bounds are recognized")
+        check(!PlaybackEvidence.coversDisplay(window: CGRect(x: 0, y: 25, width: 1920, height: 1055), display: display),
+              "Maximized window with a menu bar is not fullscreen")
+        let secondDisplay = CGRect(x: -1920, y: -100, width: 1920, height: 1080)
+        check(PlaybackEvidence.coversDisplay(window: secondDisplay, display: secondDisplay), "External display coordinates are supported")
+        check(!PlaybackEvidence.coversDisplay(window: display, display: secondDisplay), "Other displays do not cause fullscreen false positives")
+        check(!PlaybackEvidence.coversDisplay(window: .zero, display: display), "Empty windows are not playback candidates")
+        check(PlaybackEvidence.isDisplayAssertion(type: "PreventUserIdleDisplaySleep", level: 255), "Active display-awake requests qualify")
+        check(!PlaybackEvidence.isDisplayAssertion(type: "PreventUserIdleSystemSleep", level: 255), "Audio-only/system-sleep requests do not qualify")
+        check(!PlaybackEvidence.isDisplayAssertion(type: "PreventUserIdleDisplaySleep", level: 0), "Disabled display assertions do not qualify")
+        check(PlaybackEvidence(fullscreenOwners: [100], displayAssertionOwners: [100]).protectedProcesses == [100],
+              "Same-process fullscreen playback is protected")
+        check(PlaybackEvidence(fullscreenOwners: [100], displayAssertionOwners: [101], parents: [101: 100]).protectedProcesses == [100],
+              "A browser helper's wake lock protects its fullscreen parent")
+        check(PlaybackEvidence(fullscreenOwners: [100], displayAssertionOwners: [200]).protectedProcesses.isEmpty,
+              "Unrelated caffeinate/media requests do not protect a fullscreen app")
+        check(PlaybackEvidence(fullscreenOwners: [], displayAssertionOwners: [100]).protectedProcesses.isEmpty,
+              "Windowed playback is not treated as fullscreen playback")
+        check(PlaybackEvidence(fullscreenOwners: [100], displayAssertionOwners: []).protectedProcesses.isEmpty,
+              "Fullscreen alone does not exempt idle apps")
+        check(PlaybackEvidence(fullscreenOwners: [100], displayAssertionOwners: [101], parents: [101: 102, 102: 101]).protectedProcesses.isEmpty,
+              "Invalid parent cycles are bounded")
+        let protectedRow = AppRunningState(name: "Player", bundleIdentifier: "test.player", path: "/Player.app",
+            isRunning: true, isFrontmost: true, timeRemaining: 0, isPlaybackProtected: true)
+        check(!protectedRow.isActionPending, "Playback-protected rows never appear as pending close")
+
+        var interactions = AppInteractionGrace()
+        interactions.record(101, at: 100)
+        check(interactions.effectiveIdle(for: 101, systemIdle: 3600, now: 100, grace: 1.25) == 0,
+              "A launcher-opened app never inherits previous system inactivity")
+        check(interactions.effectiveIdle(for: 101, systemIdle: 3600, now: 106.25, grace: 1.25) == 5,
+              "New app receives a full timeout after the normal grace period")
+        check(interactions.effectiveIdle(for: 102, systemIdle: 3600, now: 106.25, grace: 1.25) == 3600,
+              "Opening one app does not reset other apps")
+        check(interactions.effectiveIdle(for: 101, systemIdle: 2, now: 120, grace: 1.25) == 2,
+              "Real input still takes priority over an earlier launch")
+        interactions.record(101, at: 125)
+        check(interactions.effectiveIdle(for: 101, systemIdle: 3600, now: 125, grace: 1.25) == 0,
+              "Reactivation gives an existing process a new interval")
+        interactions.remove(101)
+        check(interactions.effectiveIdle(for: 101, systemIdle: 3600, now: 126, grace: 1.25) == 3600,
+              "Terminated process protection cannot leak into a reused PID")
+        interactions.record(101, at: 100)
+        interactions.retain([102])
+        check(interactions.effectiveIdle(for: 101, systemIdle: 3600, now: 101, grace: 1.25) == 3600,
+              "Stale process interactions are pruned")
+
         let next = AppRunningState(name: "Sample", bundleIdentifier: "test.sample", path: "/Sample.app",
                                    isRunning: true, isFrontmost: true, timeRemaining: 0.2)
         check(MonitoringPhase.resolve(isMonitoring: false, configuredCount: 1, runningCount: 1, nextApp: next) == .paused,

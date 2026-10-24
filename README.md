@@ -16,7 +16,7 @@ Closing the window leaves IdleSentry running in the menu bar. Choose **Quit Idle
 
 ### What “idle” means
 
-The timeout uses system-wide keyboard and mouse inactivity, after a brief 1.25-second grace period. All running monitored apps are eligible, including the frontmost app. It does not measure how long an individual app has been in the background. Saved per-app timeout overrides are preserved.
+The timeout uses system-wide keyboard and mouse inactivity, after a brief 1.25-second grace period. All running monitored apps are eligible, including the frontmost app. Opening or bringing a monitored app to the foreground gives that process a fresh inactivity interval, even when a keyboard remapper or launcher does not reset macOS’s input-idle counter. Other monitored apps retain their deadlines. Activation from an already pending quit/save decision does not reset it. App startup must finish before an automatic action is attempted. This is still an inactivity timer, not a measurement of how long an app has been in the background. Saved per-app timeout overrides are preserved.
 
 ### Actions after inactivity
 
@@ -26,6 +26,12 @@ The timeout uses system-wide keyboard and mouse inactivity, after a brief 1.25-s
 - **Close remaining background processes** optionally force-terminates captured background instances with the same bundle identifier after the main app has exited. It never runs for Hide or while the main app is waiting for a save decision, and does not target another regular app instance. Helpers with different identifiers are not covered.
 
 **Send notifications after closing apps** is off by default, including upgrades. Enabling it requests alert permission from macOS. Notifications are silent, combine exits observed together, and report confirmed termination only. Hidden apps and declined quit requests do not notify.
+
+### Fullscreen playback protection
+
+**Inactivity Rules → Playback protection → Protect fullscreen playback** is enabled by default, including upgrades without a stored choice. It keeps an app open when a visible window covers a display and that app, or a descendant helper, holds an active display-awake request. It applies to Hide, Standard Quit and Force Quit. Protected rows show **Playback protected** and leave the closing queue; unrelated monitored apps keep their rules. When protection ends, the app receives a fresh inactivity timeout. The choice persists across restarts.
+
+This combines public window geometry and macOS power assertions; it does not read tabs, inspect video frames or require Accessibility access. It is an app-agnostic playback hint rather than a universal media-state API. Supported players/browsers must report a display-awake request. Paused players can remain protected if they retain that request; a fullscreen non-video app holding its own display-awake request can also qualify. Windowed playback, Picture in Picture, audio-only sleep requests, and unrelated keep-awake utilities do not qualify. Missing fullscreen/assertion evidence leaves normal inactivity rules in effect.
 
 ### When an app reports unsaved work
 
@@ -51,7 +57,7 @@ Use Xcode 26 or later with the macOS SDK (adaptive icon compilation requires the
 bash build.sh universal
 ```
 
-The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.18). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project is required. The build downloads a pinned Sparkle 2.10.0 framework and verifies its checksum.
+The application is created at `build/IdleSentry.app` and ad-hoc signed. The minimum deployment target remains macOS 13. The tracked `VERSION` file supplies the product version (1.0.19). Optional local `version.info` supplies build metadata; otherwise the build is labeled custom. No Xcode project is required. The build downloads a pinned Sparkle 2.10.0 framework and verifies its checksum.
 
 To create a universal DMG, app ZIP, and SHA-256 checksums, run `bash package.sh`. Both packages include `FIX LAUNCH ERROR.txt`, with the targeted quarantine command first and an explanation of signing and first-launch approval. Packaging uses command-line tools without Finder automation and is separate from publishing a GitHub release.
 
