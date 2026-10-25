@@ -1,0 +1,45 @@
+xattr -dr com.apple.quarantine "/Applications/IdleSentry.app"
+
+FIX LAUNCH ERROR — IdleSentry for macOS
+=====================================
+
+WHEN TO USE THE COMMAND ABOVE
+First drag IdleSentry.app into Applications and try opening it. If macOS blocks
+this downloaded copy because it cannot verify the developer or check the app,
+open Terminal, paste the first line of this file, press Return, then open
+IdleSentry again. If the app already opens, you do not need this command.
+
+WHY THIS CAN BE NEEDED
+Downloaded apps can carry a quarantine attribute. Gatekeeper checks them on
+first launch. This IdleSentry release is signed locally (ad-hoc); it does not
+have an Apple Developer ID signature or Apple notarization. Because macOS
+cannot verify it through that distribution process, it may block first launch
+or report that the downloaded app is damaged.
+
+WHAT THE COMMAND DOES
+It removes only the com.apple.quarantine attribute from the installed
+IdleSentry.app and its contents. The -d option deletes that named attribute;
+-r applies it recursively inside the app bundle. It does not turn off
+Gatekeeper globally or remove other extended attributes.
+
+Only use it for a copy you trust from the official IdleSentry release page.
+Removing quarantine bypasses that downloaded app's quarantine-based first-run
+check; it does not scan the app, repair a corrupted download, or notarize it.
+IdleSentry is open source so you can inspect or build the code yourself;
+open-source availability alone is not a guarantee that any download is safe.
+
+ALTERNATIVE
+After an attempted launch, macOS may offer Open Anyway in System Settings >
+Privacy & Security. Apple's explanation of opening non-notarized apps is here:
+https://support.apple.com/102445
+
+IF YOU GET AN ERROR
+- "No such file": install IdleSentry.app in Applications first. The command
+  above expects that exact location.
+- "No such xattr": quarantine is already absent; this step is unnecessary.
+- If launch still fails, re-download and compare SHA256SUMS.txt. Do not assume
+  every "damaged" message is a quarantine problem.
+
+OFFICIAL SOURCE AND DOWNLOADS
+https://github.com/synthwave541/IdleSentry
+https://github.com/synthwave541/IdleSentry/releases/tag/1.0.18
